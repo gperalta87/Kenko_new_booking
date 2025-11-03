@@ -1,0 +1,25 @@
+{
+  "name": "booking-railway-api",
+  "version": "1.0.0",
+  "description": "CRM booking scraper for fitness classes",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  },
+  "keywords": [
+    "puppeteer",
+    "scraper",
+    "booking"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.19.2",
+    "puppeteer": "^23.0.0"
+  }
+}
