@@ -419,23 +419,65 @@ async function bookClass({
         dlog("Successfully typed gym name character by character (visible)");
       }
       
-      // Wait for autocomplete/suggestion to appear (reduced wait time)
-      await sleep(500);
-      
-      // Click on the gym option from the autocomplete/suggestion list
+      // Wait for autocomplete/suggestion to appear - increase wait for production
       dlog("Waiting for gym suggestion/option to appear after typing");
-      await sleep(500);
+      await sleep(2000); // Increased wait for autocomplete to appear
       
-      dlog(`Looking for gym option: ${gymName}`);
-      await clickElement(page, [
-        `::-p-aria(${gymName} ${gymName})`,
-        `::-p-text(${gymName})`,
-        '#radix-\\:r6\\:',
-        '::-p-xpath(//*[@id="radix-:r6:"])',
-        ':scope >>> #radix-\\:r6\\:',
-        // Try to find any element containing the gym name
-        `::-p-xpath(//*[contains(text(), "${gymName}")])`
-      ], { offset: { x: 209.5, y: 10.3359375 }, debug: DEBUG });
+      // Try to find the dropdown option with multiple attempts
+      let gymOptionFound = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (attempt > 0) {
+          dlog(`Retry attempt ${attempt + 1} to find gym option...`);
+          await sleep(1000);
+        }
+        
+        // Check if dropdown is visible
+        const dropdownVisible = await page.evaluate(() => {
+          // Look for common dropdown/autocomplete containers
+          const dropdowns = document.querySelectorAll('[role="listbox"], [role="menu"], [class*="dropdown"], [class*="autocomplete"], [class*="suggestion"], div[class*="radix"]');
+          for (const dropdown of dropdowns) {
+            if (dropdown.offsetParent !== null) {
+              return true;
+            }
+          }
+          return false;
+        }).catch(() => false);
+        
+        if (dropdownVisible || attempt === 0) {
+          try {
+            dlog(`Looking for gym option: ${gymName} (attempt ${attempt + 1})`);
+            await clickElement(page, [
+              `::-p-aria(${gymName} ${gymName})`,
+              `::-p-text(${gymName})`,
+              `::-p-aria(${gymName})`,
+              '#radix-\\:r6\\:',
+              '::-p-xpath(//*[@id="radix-:r6:"])',
+              ':scope >>> #radix-\\:r6\\:',
+              // Try to find any element containing the gym name
+              `::-p-xpath(//*[contains(text(), "${gymName}")])`,
+              // Try more generic selectors
+              `::-p-xpath(//div[contains(text(), "${gymName}")])`,
+              `::-p-xpath(//span[contains(text(), "${gymName}")])`,
+              `::-p-xpath(//li[contains(text(), "${gymName}")])`,
+              // Try by aria-label
+              `[aria-label*="${gymName}"]`,
+              `[aria-label="${gymName}"]`
+            ], { offset: { x: 209.5, y: 10.3359375 }, debug: DEBUG, timeout: 5000 });
+            gymOptionFound = true;
+            break;
+          } catch (e) {
+            dlog(`Attempt ${attempt + 1} failed: ${e?.message}`);
+            // Continue to next attempt
+          }
+        }
+      }
+      
+      if (!gymOptionFound) {
+        // Last resort: try clicking anywhere in the dropdown or pressing Enter
+        dlog("All selector attempts failed, trying Enter key...");
+        await page.keyboard.press('Enter');
+        await sleep(500);
+      }
     });
 
     // Step 3: Fill email
