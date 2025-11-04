@@ -285,14 +285,14 @@ async function bookClass({
 
   // Browser launch args - optimized for Railway/containerized environments
   const launchArgs = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
     "--single-process", // Important for Railway/memory-constrained environments
-    "--disable-gpu",
+      "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
     "--disable-site-isolation-trials",
@@ -318,10 +318,7 @@ async function bookClass({
     "--no-default-browser-check",
     "--no-pings",
     "--use-fake-ui-for-media-stream",
-    "--use-fake-device-for-media-stream",
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding"
+    "--use-fake-device-for-media-stream"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
