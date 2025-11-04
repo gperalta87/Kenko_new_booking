@@ -267,18 +267,18 @@ async function bookClass({
   }
 
   // Browser launch args - optimized for Railway/containerized environments
-  // Use minimal flags for headless mode to avoid X11 issues
+  // Aggressive flags to prevent X11 initialization
   const launchArgs = [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
-    "--single-process", // Important for Railway/memory-constrained environments
-      "--disable-gpu",
+    "--single-process",
+    "--disable-gpu",
     "--disable-web-security",
-    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor",
     "--disable-site-isolation-trials",
     "--disable-software-rasterizer",
     "--disable-extensions",
@@ -301,52 +301,45 @@ async function bookClass({
     "--no-default-browser-check",
     "--no-pings",
     "--use-fake-ui-for-media-stream",
-    "--use-fake-device-for-media-stream"
+    "--use-fake-device-for-media-stream",
+    // Aggressive X11/D-Bus disabling
+    "--disable-x11",
+    "--disable-ozone",
+    "--disable-aura",
+    "--disable-gpu-compositing",
+    "--disable-software-rasterizer",
+    "--disable-threaded-animation",
+    "--disable-threaded-scrolling",
+    "--disable-checker-imaging",
+    "--disable-image-animation-resync",
+    "--disable-partial-raster"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // For headless mode, ensure we're using proper headless mode
-  // Try 'new' first (newer Puppeteer), fall back to true if that fails
+  // For Railway/headless mode, force headless=true (not 'new') for better compatibility
+  // The 'new' headless mode might still try to initialize X11
   let browser;
+  const headlessMode = headless ? true : false; // Use boolean true instead of 'new'
+  
   try {
-    // First try with 'new' headless mode
     browser = await puppeteer.launch({
-      headless: headless ? 'new' : false,
+      headless: headlessMode,
       executablePath: executablePath,
       args: launchArgs,
-    defaultViewport: { width: 1440, height: 900 },
+      defaultViewport: { width: 1440, height: 900 },
       timeout: 120000,
       ignoreHTTPSErrors: true
     });
-    dlog(`✓ Browser launched successfully with headless='new'`);
+    dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
   } catch (launchError) {
-    // If 'new' headless fails, try with true
-    if (headless) {
-      dlog(`First launch attempt failed, trying with headless=true instead of 'new'...`);
-      try {
-        browser = await puppeteer.launch({
-          headless: true,
-          executablePath: executablePath,
-          args: launchArgs,
-          defaultViewport: { width: 1440, height: 900 },
-          timeout: 120000,
-          ignoreHTTPSErrors: true
-        });
-        dlog(`✓ Browser launched successfully with headless=true`);
-      } catch (secondError) {
-        dlog(`❌ Both launch attempts failed`);
-        dlog(`First error: ${launchError?.message}`);
-        dlog(`Second error: ${secondError?.message}`);
-        throw new Error(`Failed to launch the browser process! ${secondError?.message}\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting`);
-      }
-    } else {
-      dlog(`❌ Failed to launch browser: ${launchError?.message}`);
-      dlog(`Error details: ${JSON.stringify(launchError, null, 2)}`);
-      throw new Error(`Failed to launch the browser process! ${launchError?.message}\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting`);
-    }
+    dlog(`❌ Failed to launch browser: ${launchError?.message}`);
+    dlog(`Error details: ${JSON.stringify(launchError, null, 2)}`);
+    // Try to extract more details from the error
+    const errorMsg = launchError?.message || String(launchError);
+    throw new Error(`Failed to launch the browser process! ${errorMsg}\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting`);
   }
 
   const page = await browser.newPage();
