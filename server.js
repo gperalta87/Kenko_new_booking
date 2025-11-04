@@ -423,12 +423,75 @@ async function bookClass({
       dlog("Waiting for gym suggestion/option to appear after typing");
       await sleep(2000); // Increased wait for autocomplete to appear
       
+      // Take screenshot after typing to see if dropdown appears
+      if (DEBUG) {
+        try {
+          const screenshotPath = `/tmp/gym-after-typing-${Date.now()}.png`;
+          await page.screenshot({ path: screenshotPath, fullPage: true });
+          dlog(`Screenshot saved after typing: ${screenshotPath}`);
+          console.log(`[SCREENSHOT] Gym after typing: ${screenshotPath}`);
+        } catch (e) {
+          dlog(`Could not take screenshot after typing: ${e?.message}`);
+        }
+      }
+      
+      // Get page state to debug what's visible
+      const pageState = await page.evaluate(() => {
+        // Look for dropdown/autocomplete elements
+        const dropdowns = Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], [class*="dropdown"], [class*="autocomplete"], [class*="suggestion"], div[class*="radix"]'));
+        const visibleDropdowns = dropdowns.filter(d => d.offsetParent !== null);
+        
+        // Get all text content that might contain gym name
+        const allText = Array.from(document.querySelectorAll('*')).filter(el => {
+          const text = el.textContent || '';
+          return text.length > 0 && text.length < 100 && el.offsetParent !== null;
+        }).map(el => ({
+          tag: el.tagName,
+          text: (el.textContent || '').substring(0, 50),
+          classes: el.className || ''
+        })).slice(0, 20);
+        
+        // Get input value
+        const inputs = Array.from(document.querySelectorAll('input'));
+        const inputValues = inputs.filter(i => i.offsetParent !== null).map(i => ({
+          value: i.value || '',
+          placeholder: i.placeholder || '',
+          id: i.id || ''
+        }));
+        
+        return {
+          dropdownsFound: visibleDropdowns.length,
+          dropdowns: visibleDropdowns.map(d => ({
+            tag: d.tagName,
+            classes: d.className || '',
+            text: (d.textContent || '').substring(0, 100),
+            visible: d.offsetParent !== null
+          })),
+          visibleText: allText,
+          inputValues: inputValues
+        };
+      }).catch(() => ({ dropdownsFound: 0, dropdowns: [], visibleText: [], inputValues: [] }));
+      
+      dlog(`Page state after typing: ${JSON.stringify(pageState, null, 2)}`);
+      
       // Try to find the dropdown option with multiple attempts
       let gymOptionFound = false;
       for (let attempt = 0; attempt < 5; attempt++) {
         if (attempt > 0) {
           dlog(`Retry attempt ${attempt + 1} to find gym option...`);
           await sleep(1000);
+        }
+        
+        // Take screenshot before each attempt
+        if (DEBUG && attempt === 0) {
+          try {
+            const screenshotPath = `/tmp/gym-before-attempt-${attempt + 1}-${Date.now()}.png`;
+            await page.screenshot({ path: screenshotPath, fullPage: true });
+            dlog(`Screenshot saved before attempt ${attempt + 1}: ${screenshotPath}`);
+            console.log(`[SCREENSHOT] Before attempt ${attempt + 1}: ${screenshotPath}`);
+          } catch (e) {
+            dlog(`Could not take screenshot: ${e?.message}`);
+          }
         }
         
         // Check if dropdown is visible
@@ -443,15 +506,17 @@ async function bookClass({
           return false;
         }).catch(() => false);
         
+        dlog(`Dropdown visible: ${dropdownVisible} (attempt ${attempt + 1})`);
+        
         if (dropdownVisible || attempt === 0) {
           try {
             dlog(`Looking for gym option: ${gymName} (attempt ${attempt + 1})`);
-            await clickElement(page, [
+      await clickElement(page, [
               `::-p-aria(${gymName} ${gymName})`,
               `::-p-text(${gymName})`,
               `::-p-aria(${gymName})`,
-              '#radix-\\:r6\\:',
-              '::-p-xpath(//*[@id="radix-:r6:"])',
+        '#radix-\\:r6\\:',
+        '::-p-xpath(//*[@id="radix-:r6:"])',
               ':scope >>> #radix-\\:r6\\:',
               // Try to find any element containing the gym name
               `::-p-xpath(//*[contains(text(), "${gymName}")])`,
@@ -464,6 +529,7 @@ async function bookClass({
               `[aria-label="${gymName}"]`
             ], { offset: { x: 209.5, y: 10.3359375 }, debug: DEBUG, timeout: 5000 });
             gymOptionFound = true;
+            dlog(`✓ Successfully found and clicked gym option on attempt ${attempt + 1}`);
             break;
           } catch (e) {
             dlog(`Attempt ${attempt + 1} failed: ${e?.message}`);
@@ -473,10 +539,34 @@ async function bookClass({
       }
       
       if (!gymOptionFound) {
+        // Take final screenshot before fallback
+        if (DEBUG) {
+          try {
+            const screenshotPath = `/tmp/gym-all-attempts-failed-${Date.now()}.png`;
+            await page.screenshot({ path: screenshotPath, fullPage: true });
+            dlog(`Screenshot saved after all attempts failed: ${screenshotPath}`);
+            console.log(`[SCREENSHOT] All attempts failed: ${screenshotPath}`);
+          } catch (e) {
+            dlog(`Could not take screenshot: ${e?.message}`);
+          }
+        }
+        
         // Last resort: try clicking anywhere in the dropdown or pressing Enter
         dlog("All selector attempts failed, trying Enter key...");
         await page.keyboard.press('Enter');
         await sleep(500);
+        
+        // Take screenshot after Enter key
+        if (DEBUG) {
+          try {
+            const screenshotPath = `/tmp/gym-after-enter-${Date.now()}.png`;
+            await page.screenshot({ path: screenshotPath, fullPage: true });
+            dlog(`Screenshot saved after Enter key: ${screenshotPath}`);
+            console.log(`[SCREENSHOT] After Enter key: ${screenshotPath}`);
+          } catch (e) {
+            dlog(`Could not take screenshot: ${e?.message}`);
+          }
+        }
       }
     });
 
