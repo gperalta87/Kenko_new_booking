@@ -322,22 +322,31 @@ async function bookClass({
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
+  dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
   // Set DISPLAY environment variable to prevent X11 errors (even though we're headless)
   if (headless) {
     process.env.DISPLAY = ':99';
+    dlog(`Set DISPLAY=${process.env.DISPLAY}`);
   }
 
-  const browser = await puppeteer.launch({
-    headless: headless ? 'new' : false,
-    executablePath: executablePath,
-    args: launchArgs,
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: headless ? 'new' : false,
+      executablePath: executablePath,
+      args: launchArgs,
     defaultViewport: { width: 1440, height: 900 },
-    timeout: 120000,
-    ignoreHTTPSErrors: true,
-    ignoreDefaultArgs: ['--disable-extensions'] // Don't ignore extensions arg, we handle it above
-  });
+      timeout: 120000,
+      ignoreHTTPSErrors: true
+    });
+    dlog(`✓ Browser launched successfully`);
+  } catch (launchError) {
+    dlog(`❌ Failed to launch browser: ${launchError?.message}`);
+    dlog(`Error details: ${JSON.stringify(launchError, null, 2)}`);
+    throw new Error(`Failed to launch the browser process! ${launchError?.message}\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting`);
+  }
 
   const page = await browser.newPage();
   
