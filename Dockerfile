@@ -37,7 +37,11 @@ RUN apt-get update && apt-get install -y \
 
 # Disable X11 and D-Bus for headless mode
 ENV DISPLAY=:99
+ENV XAUTHORITY=/tmp/Xauthority
 ENV DEBIAN_FRONTEND=noninteractive
+# Prevent Chromium from trying to use X11
+ENV LIBGL_ALWAYS_SOFTWARE=1
+ENV GALLIUM_DRIVER=llvmpipe
 
 # Railway-specific environment
 ENV NODE_ENV=production

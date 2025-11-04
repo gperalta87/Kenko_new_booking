@@ -310,10 +310,21 @@ async function bookClass({
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
+  // Set environment variables to prevent X11 initialization BEFORE launching browser
+  // This must be done before Puppeteer tries to launch Chromium
+  if (headless) {
+    process.env.DISPLAY = ':99';
+    process.env.XAUTHORITY = '/tmp/Xauthority';
+    // Prevent Chromium from trying to use X11
+    process.env.LIBGL_ALWAYS_SOFTWARE = '1';
+    process.env.GALLIUM_DRIVER = 'llvmpipe';
+    dlog(`Set environment variables for headless mode: DISPLAY=${process.env.DISPLAY}`);
+  }
+  
   // For Railway/headless mode, try different headless modes
   // The issue is that Chromium is trying to use X11 even in headless mode
   let browser;
-  const headlessModes = headless ? [true, 'new', false] : [false]; // Try true first, then 'new', then non-headless
+  const headlessModes = headless ? [true, 'new'] : [false]; // Try true first, then 'new'
   
   let lastError = null;
   for (const headlessMode of headlessModes) {
