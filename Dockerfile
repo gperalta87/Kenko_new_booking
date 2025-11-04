@@ -31,9 +31,9 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/* \
   && ln -s /usr/bin/chromium /usr/bin/chromium-browser || true
 
-# Use system Chromium (don't download Chrome)
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Use Puppeteer's bundled Chromium (more compatible with headless mode)
+# ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+# ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Disable X11 and D-Bus for headless mode
 ENV DISPLAY=:99
