@@ -4,8 +4,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install Chromium and common fonts/libs Puppeteer needs
 RUN apt-get update && apt-get install -y \
     chromium \
+    chromium-sandbox \
     ca-certificates \
     fonts-liberation \
+    fonts-noto-color-emoji \
     libasound2 \
     libatk-bridge2.0-0 \
     libatspi2.0-0 \
@@ -22,8 +24,11 @@ RUN apt-get update && apt-get install -y \
     libxfixes3 \
     libxrandr2 \
     libxshmfence1 \
+    libxss1 \
+    libxtst6 \
     wget \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && ln -s /usr/bin/chromium /usr/bin/chromium-browser || true
 
 # Use system Chromium (don't download Chrome)
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true

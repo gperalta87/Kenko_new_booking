@@ -248,19 +248,63 @@ async function bookClass({
   // Allow showing browser window for local testing
   // Set HEADLESS=false or pass DEBUG=true to see the browser
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
-  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || 
-    (process.platform === 'darwin' && !headless ? undefined : "/usr/bin/chromium");
+  
+  // Determine Chromium executable path
+  let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
+  if (!executablePath) {
+    if (process.platform === 'darwin' && !headless) {
+      // macOS local - use system Chrome/Chromium
+      executablePath = undefined;
+    } else {
+      // Linux/Railway - try multiple paths
+      const possiblePaths = [
+        '/usr/bin/chromium',
+        '/usr/bin/chromium-browser',
+        '/usr/bin/google-chrome',
+        '/usr/bin/google-chrome-stable'
+      ];
+      
+      for (const path of possiblePaths) {
+        try {
+          if (fs.existsSync(path)) {
+            executablePath = path;
+            dlog(`Found Chromium at: ${path}`);
+            break;
+          }
+        } catch (e) {
+          // Continue to next path
+        }
+      }
+      
+      if (!executablePath) {
+        dlog(`Warning: Could not find Chromium at standard paths. Trying default...`);
+        executablePath = '/usr/bin/chromium';
+      }
+    }
+  }
 
-  const browser = await puppeteer.launch({
-    headless: headless ? 'new' : false, // 'new' for newer Puppeteer versions, false to show browser
-    executablePath: executablePath,
-    args: [
+  // Browser launch args - optimized for Railway/containerized environments
+  const launchArgs = [
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-dev-shm-usage",
-      ...(headless ? ["--disable-gpu"] : []),
-      "--disable-web-security"
-    ],
+    "--disable-accelerated-2d-canvas",
+    "--no-first-run",
+    "--no-zygote",
+    "--single-process", // Important for Railway/memory-constrained environments
+      "--disable-gpu",
+    "--disable-web-security",
+    "--disable-features=IsolateOrigins,site-per-process",
+    "--disable-site-isolation-trials"
+  ];
+
+  dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
+  dlog(`Launch args: ${launchArgs.join(' ')}`);
+
+  const browser = await puppeteer.launch({
+    headless: headless ? 'new' : false,
+    executablePath: executablePath,
+    args: launchArgs,
     defaultViewport: { width: 1440, height: 900 },
     timeout: 120000
   });
