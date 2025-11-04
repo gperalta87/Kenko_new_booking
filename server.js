@@ -234,13 +234,17 @@ async function bookClass({
   targetTime,
   DEBUG = false
 }) {
+  // Store screenshots for debugging
+  const screenshots = [];
+  
   const dlog = (...a) => {
+    console.log(...a);
     if (DEBUG) {
       const message = `[DEBUG] ${a.map(x => typeof x === 'object' ? JSON.stringify(x) : String(x)).join(' ')}`;
       logToFile(message);
     }
   };
-
+  
   // Allow showing browser window for local testing
   // Set HEADLESS=false or pass DEBUG=true to see the browser
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
@@ -262,6 +266,20 @@ async function bookClass({
   });
 
   const page = await browser.newPage();
+  
+  // Helper to take screenshot and store as base64 (must be after page is created)
+  const takeScreenshot = async (name) => {
+    if (!DEBUG) return null;
+    try {
+      const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
+      screenshots.push({ name, data: `data:image/png;base64,${screenshot}` });
+      dlog(`Screenshot captured: ${name}`);
+      return screenshot;
+    } catch (e) {
+      dlog(`Could not take screenshot ${name}: ${e?.message}`);
+      return null;
+    }
+  };
   page.setDefaultTimeout(TIMEOUT);
 
   // Log page events
@@ -424,16 +442,7 @@ async function bookClass({
       await sleep(2000); // Increased wait for autocomplete to appear
       
       // Take screenshot after typing to see if dropdown appears
-      if (DEBUG) {
-        try {
-          const screenshotPath = `/tmp/gym-after-typing-${Date.now()}.png`;
-          await page.screenshot({ path: screenshotPath, fullPage: true });
-          dlog(`Screenshot saved after typing: ${screenshotPath}`);
-          console.log(`[SCREENSHOT] Gym after typing: ${screenshotPath}`);
-        } catch (e) {
-          dlog(`Could not take screenshot after typing: ${e?.message}`);
-        }
-      }
+      await takeScreenshot('gym-after-typing');
       
       // Get page state to debug what's visible
       const pageState = await page.evaluate(() => {
@@ -483,15 +492,8 @@ async function bookClass({
         }
         
         // Take screenshot before each attempt
-        if (DEBUG && attempt === 0) {
-          try {
-            const screenshotPath = `/tmp/gym-before-attempt-${attempt + 1}-${Date.now()}.png`;
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            dlog(`Screenshot saved before attempt ${attempt + 1}: ${screenshotPath}`);
-            console.log(`[SCREENSHOT] Before attempt ${attempt + 1}: ${screenshotPath}`);
-          } catch (e) {
-            dlog(`Could not take screenshot: ${e?.message}`);
-          }
+        if (attempt === 0) {
+          await takeScreenshot(`gym-before-attempt-${attempt + 1}`);
         }
         
         // Check if dropdown is visible
@@ -540,16 +542,7 @@ async function bookClass({
       
       if (!gymOptionFound) {
         // Take final screenshot before fallback
-        if (DEBUG) {
-          try {
-            const screenshotPath = `/tmp/gym-all-attempts-failed-${Date.now()}.png`;
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            dlog(`Screenshot saved after all attempts failed: ${screenshotPath}`);
-            console.log(`[SCREENSHOT] All attempts failed: ${screenshotPath}`);
-          } catch (e) {
-            dlog(`Could not take screenshot: ${e?.message}`);
-          }
-        }
+        await takeScreenshot('gym-all-attempts-failed');
         
         // Last resort: try clicking anywhere in the dropdown or pressing Enter
         dlog("All selector attempts failed, trying Enter key...");
@@ -557,16 +550,7 @@ async function bookClass({
         await sleep(500);
         
         // Take screenshot after Enter key
-        if (DEBUG) {
-          try {
-            const screenshotPath = `/tmp/gym-after-enter-${Date.now()}.png`;
-            await page.screenshot({ path: screenshotPath, fullPage: true });
-            dlog(`Screenshot saved after Enter key: ${screenshotPath}`);
-            console.log(`[SCREENSHOT] After Enter key: ${screenshotPath}`);
-          } catch (e) {
-            dlog(`Could not take screenshot: ${e?.message}`);
-          }
-        }
+        await takeScreenshot('gym-after-enter');
       }
     });
 
@@ -2128,7 +2112,8 @@ async function bookClass({
 
     return {
       ok: true,
-      message: `Successfully booked class for ${CUSTOMER_NAME} on ${targetDate} at ${targetTime}`
+      message: `Successfully booked class for ${CUSTOMER_NAME} on ${targetDate} at ${targetTime}`,
+      ...(DEBUG && screenshots.length > 0 ? { screenshots } : {})
     };
 
   } catch (err) {
@@ -2136,7 +2121,8 @@ async function bookClass({
     await browser.close().catch(() => {});
     return {
       ok: false,
-      error: err?.message || String(err)
+      error: err?.message || String(err),
+      ...(DEBUG && screenshots.length > 0 ? { screenshots } : {})
     };
   }
 }
