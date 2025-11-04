@@ -286,14 +286,14 @@ async function bookClass({
   // Browser launch args - optimized for Railway/containerized environments
   // Use minimal flags for headless mode to avoid X11 issues
   const launchArgs = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
     "--single-process", // Important for Railway/memory-constrained environments
-    "--disable-gpu",
+      "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
     "--disable-site-isolation-trials",
@@ -318,14 +318,7 @@ async function bookClass({
     "--no-default-browser-check",
     "--no-pings",
     "--use-fake-ui-for-media-stream",
-    "--use-fake-device-for-media-stream",
-    // Additional flags to prevent X11 initialization
-    "--disable-setuid-sandbox",
-    "--disable-background-timer-throttling",
-    "--disable-backgrounding-occluded-windows",
-    "--disable-renderer-backgrounding",
-    "--disable-features=TranslateUI",
-    "--disable-ipc-flooding-protection"
+    "--use-fake-device-for-media-stream"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
@@ -341,7 +334,7 @@ async function bookClass({
       headless: headless ? 'new' : false,
       executablePath: executablePath,
       args: launchArgs,
-      defaultViewport: { width: 1440, height: 900 },
+    defaultViewport: { width: 1440, height: 900 },
       timeout: 120000,
       ignoreHTTPSErrors: true
     });
