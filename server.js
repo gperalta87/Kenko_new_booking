@@ -302,43 +302,51 @@ async function bookClass({
     "--no-pings",
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
-    // Aggressive X11/D-Bus disabling
-    "--disable-x11",
-    "--disable-ozone",
-    "--disable-aura",
-    "--disable-gpu-compositing",
-    "--disable-software-rasterizer",
-    "--disable-threaded-animation",
-    "--disable-threaded-scrolling",
-    "--disable-checker-imaging",
-    "--disable-image-animation-resync",
-    "--disable-partial-raster"
+    // Additional flags for headless mode
+    "--disable-gpu-compositing"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // For Railway/headless mode, force headless=true (not 'new') for better compatibility
-  // The 'new' headless mode might still try to initialize X11
+  // For Railway/headless mode, try different headless modes
+  // The issue is that Chromium is trying to use X11 even in headless mode
   let browser;
-  const headlessMode = headless ? true : false; // Use boolean true instead of 'new'
+  const headlessModes = headless ? [true, 'new', false] : [false]; // Try true first, then 'new', then non-headless
   
-  try {
-    browser = await puppeteer.launch({
-      headless: headlessMode,
-      executablePath: executablePath,
-      args: launchArgs,
-      defaultViewport: { width: 1440, height: 900 },
-      timeout: 120000,
-      ignoreHTTPSErrors: true
-    });
-    dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
-  } catch (launchError) {
-    dlog(`❌ Failed to launch browser: ${launchError?.message}`);
-    dlog(`Error details: ${JSON.stringify(launchError, null, 2)}`);
-    // Try to extract more details from the error
-    const errorMsg = launchError?.message || String(launchError);
+  let lastError = null;
+  for (const headlessMode of headlessModes) {
+    try {
+      dlog(`Trying to launch browser with headless=${headlessMode}...`);
+      
+      // If headlessMode is false, we still need the args for containerized environment
+      const browserArgs = headlessMode ? launchArgs : launchArgs.filter(arg => 
+        !arg.includes('--disable-gpu') && !arg.includes('--single-process')
+      );
+      
+      browser = await puppeteer.launch({
+        headless: headlessMode,
+        executablePath: executablePath,
+        args: browserArgs,
+        defaultViewport: { width: 1440, height: 900 },
+        timeout: 120000,
+        ignoreHTTPSErrors: true
+      });
+      dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
+      break; // Success, exit loop
+    } catch (launchError) {
+      lastError = launchError;
+      dlog(`Failed with headless=${headlessMode}: ${launchError?.message}`);
+      // Continue to next mode
+    }
+  }
+  
+  if (!browser) {
+    dlog(`❌ All headless modes failed`);
+    dlog(`Last error: ${lastError?.message}`);
+    dlog(`Error details: ${JSON.stringify(lastError, null, 2)}`);
+    const errorMsg = lastError?.message || String(lastError);
     throw new Error(`Failed to launch the browser process! ${errorMsg}\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting`);
   }
 
