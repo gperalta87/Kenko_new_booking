@@ -285,28 +285,61 @@ async function bookClass({
 
   // Browser launch args - optimized for Railway/containerized environments
   const launchArgs = [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
     "--single-process", // Important for Railway/memory-constrained environments
-      "--disable-gpu",
+    "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process",
-    "--disable-site-isolation-trials"
+    "--disable-site-isolation-trials",
+    // Disable X11/D-Bus requirements for headless mode
+    "--disable-software-rasterizer",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-background-timer-throttling",
+    "--disable-renderer-backgrounding",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-breakpad",
+    "--disable-component-update",
+    "--disable-default-apps",
+    "--disable-domain-reliability",
+    "--disable-features=TranslateUI",
+    "--disable-hang-monitor",
+    "--disable-ipc-flooding-protection",
+    "--disable-notifications",
+    "--disable-prompt-on-repost",
+    "--disable-sync",
+    "--metrics-recording-only",
+    "--mute-audio",
+    "--no-default-browser-check",
+    "--no-pings",
+    "--use-fake-ui-for-media-stream",
+    "--use-fake-device-for-media-stream",
+    "--disable-background-timer-throttling",
+    "--disable-backgrounding-occluded-windows",
+    "--disable-renderer-backgrounding"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
+
+  // Set DISPLAY environment variable to prevent X11 errors (even though we're headless)
+  if (headless) {
+    process.env.DISPLAY = ':99';
+  }
 
   const browser = await puppeteer.launch({
     headless: headless ? 'new' : false,
     executablePath: executablePath,
     args: launchArgs,
     defaultViewport: { width: 1440, height: 900 },
-    timeout: 120000
+    timeout: 120000,
+    ignoreHTTPSErrors: true,
+    ignoreDefaultArgs: ['--disable-extensions'] // Don't ignore extensions arg, we handle it above
   });
 
   const page = await browser.newPage();

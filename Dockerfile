@@ -34,6 +34,10 @@ RUN apt-get update && apt-get install -y \
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
+# Disable X11 and D-Bus for headless mode
+ENV DISPLAY=:99
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Railway-specific environment
 ENV NODE_ENV=production
 ENV PORT=3000
