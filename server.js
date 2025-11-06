@@ -319,6 +319,14 @@ async function bookClass({
     process.env.LIBGL_ALWAYS_SOFTWARE = '1';
     process.env.GALLIUM_DRIVER = 'llvmpipe';
     dlog(`Set environment variables for headless mode: DISPLAY=${process.env.DISPLAY}`);
+    
+    // Wait a moment for xvfb to be ready (if it was just started)
+    // Check if DISPLAY is accessible
+    if (process.env.DISPLAY) {
+      dlog(`Waiting for X server at ${process.env.DISPLAY} to be ready...`);
+      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+      dlog(`Proceeding with browser launch`);
+    }
   }
   
   // For Railway/headless mode, try different headless modes

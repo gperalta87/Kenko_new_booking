@@ -62,5 +62,5 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Start the application
-CMD ["node", "server.js"]
+# Start xvfb and then the application
+CMD Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 & node server.js
