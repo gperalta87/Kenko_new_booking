@@ -286,14 +286,14 @@ async function bookClass({
   // Browser launch args - optimized for Railway/containerized environments
   // Aggressive flags to prevent X11 initialization
   const launchArgs = [
-    "--no-sandbox",
-    "--disable-setuid-sandbox",
-    "--disable-dev-shm-usage",
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
     "--single-process",
-    "--disable-gpu",
+      "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor",
     "--disable-site-isolation-trials",
@@ -397,7 +397,7 @@ async function bookClass({
         headless: headlessMode,
         executablePath: executablePath,
         args: browserArgs,
-        defaultViewport: { width: 1440, height: 900 },
+    defaultViewport: { width: 1440, height: 900 },
         timeout: 120000,
         ignoreHTTPSErrors: true
       });
