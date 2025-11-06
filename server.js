@@ -354,9 +354,12 @@ async function bookClass({
   }
   
   // For Railway/headless mode, try different headless modes
-  // The issue is that Chromium is trying to use X11 even in headless mode
+  // If DISPLAY is set (xvfb is running), try headless: false first so Chromium uses xvfb
+  // Otherwise try headless modes
   let browser;
-  const headlessModes = headless ? ['new', true] : [false]; // Try 'new' first (more stable), then true
+  const headlessModes = headless 
+    ? (process.env.DISPLAY ? [false, 'new', true] : ['new', true]) // If DISPLAY set, try false first
+    : [false];
   
   let lastError = null;
   for (const headlessMode of headlessModes) {
