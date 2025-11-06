@@ -254,8 +254,15 @@ async function bookClass({
   let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   if (!executablePath) {
     // Use Puppeteer's bundled Chromium (better headless support, no X11 dependencies)
-    executablePath = undefined;
-    dlog(`Using Puppeteer's bundled Chromium (best headless support)`);
+    // Get the executable path explicitly from Puppeteer to ensure we're using bundled version
+    try {
+      executablePath = puppeteer.executablePath();
+      dlog(`Using Puppeteer's bundled Chromium at: ${executablePath}`);
+    } catch (e) {
+      // Fallback to undefined (Puppeteer will use bundled Chromium)
+      executablePath = undefined;
+      dlog(`Using Puppeteer's bundled Chromium (default path)`);
+    }
   } else {
     dlog(`Using custom Chromium path: ${executablePath}`);
   }
