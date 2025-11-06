@@ -261,16 +261,16 @@ async function bookClass({
   }
 
   // Browser launch args - optimized for Railway/containerized environments
-  // Aggressive flags to prevent X11 initialization
+  // Force headless backend and prevent X11 detection
   const launchArgs = [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--no-zygote",
     "--single-process",
-      "--disable-gpu",
+    "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor",
     "--disable-site-isolation-trials",
@@ -296,10 +296,7 @@ async function bookClass({
     "--no-pings",
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
-    // Additional flags for headless mode
     "--disable-gpu-compositing",
-    // Force headless rendering and disable D-Bus
-    "--disable-software-rasterizer",
     "--disable-gpu-sandbox",
     "--disable-oop-rasterization",
     "--disable-partial-raster",
@@ -311,20 +308,17 @@ async function bookClass({
     "--disable-image-animation-resync",
     "--run-all-compositor-stages-before-draw",
     "--disable-background-drawing",
-    "--disable-background-networking",
     "--disable-client-side-phishing-detection",
-    "--disable-default-apps",
-    "--disable-hang-monitor",
     "--disable-popup-blocking",
-    "--disable-prompt-on-repost",
-    "--disable-sync",
     "--disable-translate",
-    "--metrics-recording-only",
-    "--no-first-run",
     "--safebrowsing-disable-auto-update",
     "--enable-automation",
     "--password-store=basic",
-    "--use-mock-keychain"
+    "--use-mock-keychain",
+    // Force headless backend - prevent X11 detection
+    "--headless=new",
+    "--disable-gpu",
+    "--virtual-time-budget=5000"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
@@ -334,13 +328,16 @@ async function bookClass({
   // For headless mode, ensure DISPLAY is NOT set so Chromium uses true headless backend
   // Puppeteer's bundled Chromium works best in headless mode without X11
   if (headless) {
+    // Log current DISPLAY value before unsetting
+    const displayBefore = process.env.DISPLAY || 'not set';
+    dlog(`DISPLAY before unset: ${displayBefore}`);
     // Unset DISPLAY to force Chromium to use headless backend (not X11)
     delete process.env.DISPLAY;
     delete process.env.XAUTHORITY;
     // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
-    dlog(`Using true headless mode - DISPLAY unset, Chromium will use headless backend`);
+    dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore}), Chromium will use headless backend`);
   }
   
   // Use headless: 'new' mode (most stable) for headless, false for local testing
