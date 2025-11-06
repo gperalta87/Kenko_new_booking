@@ -266,14 +266,16 @@ async function bookClass({
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
-    ...(headless ? ["--headless=new"] : []), // Explicitly set headless mode
+    ...(headless ? [
+      "--headless=new", // Explicitly set headless mode
+      "--disable-gpu", // Must be before other flags
+      "--disable-software-rasterizer",
+    ] : []),
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
-    "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor",
     "--disable-site-isolation-trials",
-    "--disable-software-rasterizer",
     "--disable-extensions",
     "--disable-background-networking",
     "--disable-background-timer-throttling",
@@ -333,6 +335,9 @@ async function bookClass({
     // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
+    // Additional environment variables to prevent X11 detection
+    process.env.LIBGL_ALWAYS_SOFTWARE = '1';
+    process.env.GALLIUM_DRIVER = 'llvmpipe';
     dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore}), Chromium will use headless backend`);
   }
   
