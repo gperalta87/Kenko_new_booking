@@ -1,11 +1,9 @@
 FROM node:20-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install Chromium and common fonts/libs Puppeteer needs
+# Install only fonts/libs Puppeteer needs (no Chromium, no xvfb)
+# Puppeteer will use its bundled Chromium which has better headless support
 RUN apt-get update && apt-get install -y \
-    chromium \
-    chromium-sandbox \
-    xvfb \
     ca-certificates \
     fonts-liberation \
     fonts-noto-color-emoji \
@@ -16,24 +14,11 @@ RUN apt-get update && apt-get install -y \
     libgbm1 \
     libgtk-3-0 \
     libnss3 \
-    libx11-6 \
-    libx11-xcb1 \
-    libxcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxrandr2 \
-    libxshmfence1 \
-    libxss1 \
-    libxtst6 \
     wget \
-  && rm -rf /var/lib/apt/lists/* \
-  && ln -s /usr/bin/chromium /usr/bin/chromium-browser || true
+  && rm -rf /var/lib/apt/lists/*
 
-# Use system Chromium for Railway (better compatibility)
-ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Use Puppeteer's bundled Chromium (better headless support, no X11 dependencies)
+# Don't set PUPPETEER_SKIP_CHROMIUM_DOWNLOAD - let Puppeteer use its bundled version
 
 # Railway-specific environment
 ENV NODE_ENV=production
@@ -50,8 +35,7 @@ WORKDIR /app
 # Copy package files first for better caching
 COPY package.json ./
 
-# Install dependencies
-# Note: If you add package-lock.json to your repo, you can use 'npm ci --only=production' for faster, reproducible builds
+# Install dependencies (this will download Puppeteer's bundled Chromium)
 RUN npm install --only=production
 
 # Copy source code
@@ -60,10 +44,5 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
-# Start xvfb to provide virtual X server for Chromium
-# This prevents Chromium from trying to connect to a real X server
-RUN echo '#!/bin/sh\nXvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &\nexport DISPLAY=:99\nsleep 2\nexec "$@"' > /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
-
-# Start the application
-ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+# Start the application directly (no entrypoint script needed)
 CMD ["node", "server.js"]

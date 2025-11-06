@@ -250,29 +250,12 @@ async function bookClass({
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
   
   // Determine Chromium executable path
-  // On Railway, use system Chromium for better compatibility
+  // Use Puppeteer's bundled Chromium (best headless support, no X11 dependencies)
   let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   if (!executablePath) {
-    // Try to use system Chromium first (better for Railway/containerized environments)
-    try {
-      const systemChromiumPaths = ['/usr/bin/chromium', '/usr/bin/chromium-browser'];
-      for (const chromiumPath of systemChromiumPaths) {
-        if (fs.existsSync(chromiumPath)) {
-          executablePath = chromiumPath;
-          dlog(`Using system Chromium at: ${executablePath}`);
-          break;
-        }
-      }
-      if (!executablePath) {
-        // Fallback to Puppeteer's bundled Chromium
-        executablePath = puppeteer.executablePath();
-        dlog(`Using Puppeteer's bundled Chromium at: ${executablePath}`);
-      }
-    } catch (e) {
-      // Fallback to Puppeteer's bundled Chromium
-      executablePath = puppeteer.executablePath();
-      dlog(`Using Puppeteer's bundled Chromium (fallback): ${executablePath}`);
-    }
+    // Use Puppeteer's bundled Chromium - it handles headless mode properly
+    executablePath = undefined; // undefined means use bundled Chromium
+    dlog(`Using Puppeteer's bundled Chromium (best headless support)`);
   } else {
     dlog(`Using custom Chromium path: ${executablePath}`);
   }
@@ -339,29 +322,18 @@ async function bookClass({
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // For headless mode, ensure DISPLAY is properly configured
-  // If xvfb is running (DISPLAY=:99), keep it set. Otherwise, unset it for true headless.
+  // For headless mode, ensure DISPLAY is NOT set so Chromium uses true headless backend
+  // Puppeteer's bundled Chromium works best in headless mode without X11
   if (headless) {
-    // Log current DISPLAY value
     const displayBefore = process.env.DISPLAY || 'not set';
-    dlog(`DISPLAY before check: ${displayBefore}`);
-    
-    // If DISPLAY is set to :99, xvfb is running - keep it set
-    // Otherwise, unset DISPLAY to force Chromium to use headless backend
-    if (process.env.DISPLAY !== ':99') {
-      process.env.DISPLAY = '';
-      process.env.XAUTHORITY = '';
-      dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore})`);
-    } else {
-      dlog(`Using xvfb virtual X server - DISPLAY=${process.env.DISPLAY}`);
-    }
-    
+    dlog(`DISPLAY before unset: ${displayBefore}`);
+    // Unset DISPLAY to force Chromium to use headless backend (not X11)
+    process.env.DISPLAY = '';
+    process.env.XAUTHORITY = '';
     // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
-    // Additional environment variables to prevent X11 detection
-    process.env.LIBGL_ALWAYS_SOFTWARE = '1';
-    process.env.GALLIUM_DRIVER = 'llvmpipe';
+    dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore}), Chromium will use headless backend`);
   }
   
   // Use headless: 'new' mode (most stable) for headless, false for local testing
