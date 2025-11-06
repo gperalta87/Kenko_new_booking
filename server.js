@@ -331,13 +331,13 @@ async function bookClass({
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // Set environment variables to prevent X11 initialization BEFORE launching browser
-  // In true headless mode, Chromium shouldn't need DISPLAY
+  // Set environment variables BEFORE launching browser
+  // xvfb is running, so set DISPLAY so Chromium can connect if it detects X11 libraries
+  // But we'll still use headless mode for rendering
   if (headless) {
-    // Unset DISPLAY for true headless mode - Chromium's headless mode doesn't need X11
-    // xvfb is still running in the background as a fallback, but we don't tell Chromium about it
-    delete process.env.DISPLAY;
-    delete process.env.XAUTHORITY;
+    // Set DISPLAY to xvfb (xvfb is running from startup script)
+    process.env.DISPLAY = ':99';
+    process.env.XAUTHORITY = '/tmp/Xauthority';
     // Prevent Chromium from trying to use X11
     process.env.LIBGL_ALWAYS_SOFTWARE = '1';
     process.env.GALLIUM_DRIVER = 'llvmpipe';
@@ -346,10 +346,10 @@ async function bookClass({
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
     // Force headless mode
     process.env.CHROME_DEVEL_SANDBOX = '';
-    dlog(`Unset DISPLAY for true headless mode - Chromium should use headless backend`);
+    dlog(`Set DISPLAY=:99 (xvfb is running) - Chromium will use headless mode for rendering`);
     
-    // Small delay to ensure everything is ready
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait for xvfb to be fully ready
+    await new Promise(resolve => setTimeout(resolve, 2000));
     dlog(`Proceeding with browser launch`);
   }
   
