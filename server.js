@@ -303,7 +303,34 @@ async function bookClass({
     "--use-fake-ui-for-media-stream",
     "--use-fake-device-for-media-stream",
     // Additional flags for headless mode
-    "--disable-gpu-compositing"
+    "--disable-gpu-compositing",
+    // Force headless rendering and disable D-Bus
+    "--disable-software-rasterizer",
+    "--disable-gpu-sandbox",
+    "--disable-oop-rasterization",
+    "--disable-partial-raster",
+    "--disable-skia-runtime-opts",
+    "--disable-system-font-check",
+    "--disable-threaded-animation",
+    "--disable-threaded-scrolling",
+    "--disable-checker-imaging",
+    "--disable-image-animation-resync",
+    "--run-all-compositor-stages-before-draw",
+    "--disable-background-drawing",
+    "--disable-background-networking",
+    "--disable-client-side-phishing-detection",
+    "--disable-default-apps",
+    "--disable-hang-monitor",
+    "--disable-popup-blocking",
+    "--disable-prompt-on-repost",
+    "--disable-sync",
+    "--disable-translate",
+    "--metrics-recording-only",
+    "--no-first-run",
+    "--safebrowsing-disable-auto-update",
+    "--enable-automation",
+    "--password-store=basic",
+    "--use-mock-keychain"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
@@ -318,13 +345,18 @@ async function bookClass({
     // Prevent Chromium from trying to use X11
     process.env.LIBGL_ALWAYS_SOFTWARE = '1';
     process.env.GALLIUM_DRIVER = 'llvmpipe';
+    // Disable D-Bus to prevent connection errors
+    process.env.DBUS_SESSION_BUS_ADDRESS = '';
+    process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
+    // Force headless mode
+    process.env.CHROME_DEVEL_SANDBOX = '';
     dlog(`Set environment variables for headless mode: DISPLAY=${process.env.DISPLAY}`);
     
     // Wait a moment for xvfb to be ready (if it was just started)
     // Check if DISPLAY is accessible
     if (process.env.DISPLAY) {
       dlog(`Waiting for X server at ${process.env.DISPLAY} to be ready...`);
-      await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay
+      await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay
       dlog(`Proceeding with browser launch`);
     }
   }
@@ -332,7 +364,7 @@ async function bookClass({
   // For Railway/headless mode, try different headless modes
   // The issue is that Chromium is trying to use X11 even in headless mode
   let browser;
-  const headlessModes = headless ? [true, 'new'] : [false]; // Try true first, then 'new'
+  const headlessModes = headless ? ['new', true] : [false]; // Try 'new' first (more stable), then true
   
   let lastError = null;
   for (const headlessMode of headlessModes) {

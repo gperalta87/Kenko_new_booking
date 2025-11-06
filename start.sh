@@ -18,8 +18,20 @@ fi
 
 echo "Xvfb is running (PID: $XVFB_PID)"
 
-# Set display environment variable
+# Set display and other environment variables
 export DISPLAY=:99
+export XAUTHORITY=/tmp/Xauthority
+export LIBGL_ALWAYS_SOFTWARE=1
+export GALLIUM_DRIVER=llvmpipe
+# Disable D-Bus to prevent connection errors
+export DBUS_SESSION_BUS_ADDRESS=""
+export DBUS_SYSTEM_BUS_ADDRESS=""
+
+# Verify Xvfb is accessible
+echo "Verifying X server is accessible..."
+if ! xdpyinfo -display :99 >/dev/null 2>&1; then
+    echo "WARNING: X server may not be fully ready, but continuing..."
+fi
 
 # Start Node.js application
 echo "Starting Node.js application..."
