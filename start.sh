@@ -2,21 +2,21 @@
 set -e
 
 # Start xvfb in the background
-echo "Starting Xvfb on display :99..."
-Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset &
+echo "=== Starting Xvfb on display :99... ==="
+Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
 XVFB_PID=$!
 
-# Wait for Xvfb to be ready
-echo "Waiting for Xvfb to be ready..."
-sleep 5
+# Wait for xvfb to start
+sleep 2
 
-# Verify Xvfb is running
+# Verify xvfb is running
 if ! kill -0 $XVFB_PID 2>/dev/null; then
-    echo "ERROR: Xvfb failed to start"
+    echo "ERROR: Xvfb failed to start. Check /tmp/xvfb.log"
+    cat /tmp/xvfb.log || true
     exit 1
 fi
 
-echo "Xvfb is running (PID: $XVFB_PID)"
+echo "=== Xvfb is running (PID: $XVFB_PID) ==="
 
 # Set display and other environment variables
 export DISPLAY=:99
@@ -28,13 +28,20 @@ export DBUS_SESSION_BUS_ADDRESS=""
 export DBUS_SYSTEM_BUS_ADDRESS=""
 
 # Give Xvfb more time to fully initialize
-echo "Waiting additional time for X server to be fully ready..."
+echo "=== Waiting additional time for X server to be fully ready... ==="
 sleep 3
 
-# Test if X server is accessible (optional check)
-echo "X server should be ready now. DISPLAY=${DISPLAY}"
+# Test if X server is accessible
+echo "=== X server should be ready now. DISPLAY=${DISPLAY} ==="
+if command -v xdpyinfo >/dev/null 2>&1; then
+    if xdpyinfo -display :99 >/dev/null 2>&1; then
+        echo "=== X server is accessible! ==="
+    else
+        echo "=== WARNING: X server may not be fully accessible ==="
+    fi
+fi
 
 # Start Node.js application
-echo "Starting Node.js application..."
+echo "=== Starting Node.js application... ==="
 exec node server.js
 

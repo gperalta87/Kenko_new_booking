@@ -66,4 +66,4 @@ RUN chmod +x start.sh
 EXPOSE 3000
 
 # Start xvfb and then the application using the startup script
-CMD ["./start.sh"]
+CMD ["/bin/bash", "./start.sh"]
