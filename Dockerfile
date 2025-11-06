@@ -31,9 +31,9 @@ RUN apt-get update && apt-get install -y \
   && rm -rf /var/lib/apt/lists/* \
   && ln -s /usr/bin/chromium /usr/bin/chromium-browser || true
 
-# Use Puppeteer's bundled Chromium (better headless support)
-# ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
-# ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
+# Use system Chromium for Railway (better compatibility)
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 # Railway-specific environment
 ENV NODE_ENV=production

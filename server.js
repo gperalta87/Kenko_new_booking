@@ -250,18 +250,28 @@ async function bookClass({
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
   
   // Determine Chromium executable path
-  // Use Puppeteer's bundled Chromium for better headless support
+  // On Railway, use system Chromium for better compatibility
   let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   if (!executablePath) {
-    // Use Puppeteer's bundled Chromium (better headless support, no X11 dependencies)
-    // Get the executable path explicitly from Puppeteer to ensure we're using bundled version
+    // Try to use system Chromium first (better for Railway/containerized environments)
     try {
-      executablePath = puppeteer.executablePath();
-      dlog(`Using Puppeteer's bundled Chromium at: ${executablePath}`);
+      const systemChromiumPaths = ['/usr/bin/chromium', '/usr/bin/chromium-browser'];
+      for (const chromiumPath of systemChromiumPaths) {
+        if (fs.existsSync(chromiumPath)) {
+          executablePath = chromiumPath;
+          dlog(`Using system Chromium at: ${executablePath}`);
+          break;
+        }
+      }
+      if (!executablePath) {
+        // Fallback to Puppeteer's bundled Chromium
+        executablePath = puppeteer.executablePath();
+        dlog(`Using Puppeteer's bundled Chromium at: ${executablePath}`);
+      }
     } catch (e) {
-      // Fallback to undefined (Puppeteer will use bundled Chromium)
-      executablePath = undefined;
-      dlog(`Using Puppeteer's bundled Chromium (default path)`);
+      // Fallback to Puppeteer's bundled Chromium
+      executablePath = puppeteer.executablePath();
+      dlog(`Using Puppeteer's bundled Chromium (fallback): ${executablePath}`);
     }
   } else {
     dlog(`Using custom Chromium path: ${executablePath}`);
