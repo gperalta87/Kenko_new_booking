@@ -268,8 +268,6 @@ async function bookClass({
     "--disable-dev-shm-usage",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
-    "--no-zygote",
-    "--single-process",
     "--disable-gpu",
     "--disable-web-security",
     "--disable-features=IsolateOrigins,site-per-process,VizDisplayCompositor",
@@ -314,11 +312,7 @@ async function bookClass({
     "--safebrowsing-disable-auto-update",
     "--enable-automation",
     "--password-store=basic",
-    "--use-mock-keychain",
-    // Force headless backend - prevent X11 detection
-    "--headless=new",
-    "--disable-gpu",
-    "--virtual-time-budget=5000"
+    "--use-mock-keychain"
   ];
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
@@ -365,6 +359,9 @@ async function bookClass({
   }
 
   const page = await browser.newPage();
+  
+  // Small delay to ensure page is stable
+  await sleep(500);
   
   // Helper to take screenshot and store as base64 (must be after page is created)
   const takeScreenshot = async (name) => {
