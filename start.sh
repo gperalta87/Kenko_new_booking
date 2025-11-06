@@ -28,7 +28,11 @@ export DBUS_SESSION_BUS_ADDRESS=""
 export DBUS_SYSTEM_BUS_ADDRESS=""
 
 # Give Xvfb more time to fully initialize
-echo "X server should be ready now"
+echo "Waiting additional time for X server to be fully ready..."
+sleep 3
+
+# Test if X server is accessible (optional check)
+echo "X server should be ready now. DISPLAY=${DISPLAY}"
 
 # Start Node.js application
 echo "Starting Node.js application..."
