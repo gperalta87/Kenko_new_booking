@@ -4,7 +4,6 @@ import express from "express";
 import puppeteer from "puppeteer";
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -250,31 +249,6 @@ async function bookClass({
   // Set HEADLESS=false or pass DEBUG=true to see the browser
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
   
-  // Start xvfb if running in headless mode on Linux (Railway/containerized environment)
-  let xvfbProcess = null;
-  if (process.platform === 'linux' && headless) {
-    try {
-      dlog("=== Starting xvfb from Node.js ===");
-      // Set DISPLAY if not already set
-      if (!process.env.DISPLAY) {
-        process.env.DISPLAY = ':99';
-        dlog("=== Set DISPLAY=:99 ===");
-      }
-      xvfbProcess = spawn('Xvfb', [':99', '-screen', '0', '1024x768x24', '-ac', '+extension', 'GLX', '+render', '-noreset'], {
-        stdio: 'ignore',
-        detached: true
-      });
-      xvfbProcess.unref(); // Allow Node.js to exit independently
-      dlog(`=== xvfb started (PID: ${xvfbProcess.pid}) ===`);
-      // Wait a moment for xvfb to initialize
-      await sleep(3000);
-      dlog("=== xvfb should be ready now ===");
-    } catch (error) {
-      dlog(`=== Warning: Could not start xvfb: ${error.message} ===`);
-      // Continue anyway - maybe xvfb is already running
-    }
-  }
-  
   // Determine Chromium executable path
   // Use Puppeteer's bundled Chromium for better headless support
   let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -357,68 +331,39 @@ async function bookClass({
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // Set environment variables BEFORE launching browser
-  // xvfb is running, so set DISPLAY so Chromium can connect if it detects X11 libraries
-  // But we'll still use headless mode for rendering
+  // For headless mode, ensure DISPLAY is NOT set so Chromium uses true headless backend
+  // Puppeteer's bundled Chromium works best in headless mode without X11
   if (headless) {
-    // Set DISPLAY to xvfb (xvfb is running from startup script)
-    process.env.DISPLAY = ':99';
-    process.env.XAUTHORITY = '/tmp/Xauthority';
-    // Prevent Chromium from trying to use X11
-    process.env.LIBGL_ALWAYS_SOFTWARE = '1';
-    process.env.GALLIUM_DRIVER = 'llvmpipe';
+    // Unset DISPLAY to force Chromium to use headless backend (not X11)
+    delete process.env.DISPLAY;
+    delete process.env.XAUTHORITY;
     // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
-    // Force headless mode
-    process.env.CHROME_DEVEL_SANDBOX = '';
-    dlog(`Set DISPLAY=:99 (xvfb is running) - Chromium will use headless mode for rendering`);
-    
-    // Wait for xvfb to be fully ready
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    dlog(`Proceeding with browser launch`);
+    dlog(`Using true headless mode - DISPLAY unset, Chromium will use headless backend`);
   }
   
-  // For Railway/headless mode, try different headless modes
-  // If DISPLAY is set (xvfb is running), try headless: false first so Chromium uses xvfb
-  // Otherwise try headless modes
+  // Use headless: 'new' mode (most stable) for headless, false for local testing
   let browser;
-  const headlessModes = headless 
-    ? (process.env.DISPLAY ? [false, 'new', true] : ['new', true]) // If DISPLAY set, try false first
-    : [false];
+  const headlessMode = headless ? 'new' : false;
   
-  let lastError = null;
-  for (const headlessMode of headlessModes) {
-    try {
-      dlog(`Trying to launch browser with headless=${headlessMode}...`);
-      
-      // If headlessMode is false, we still need the args for containerized environment
-      const browserArgs = headlessMode ? launchArgs : launchArgs.filter(arg => 
-        !arg.includes('--disable-gpu') && !arg.includes('--single-process')
-      );
-      
-      browser = await puppeteer.launch({
-        headless: headlessMode,
-        executablePath: executablePath,
-        args: browserArgs,
-    defaultViewport: { width: 1440, height: 900 },
-        timeout: 120000,
-        ignoreHTTPSErrors: true
-      });
-      dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
-      break; // Success, exit loop
-    } catch (launchError) {
-      lastError = launchError;
-      dlog(`Failed with headless=${headlessMode}: ${launchError?.message}`);
-      // Continue to next mode
-    }
-  }
-  
-  if (!browser) {
-    dlog(`❌ All headless modes failed`);
-    dlog(`Last error: ${lastError?.message}`);
-    dlog(`Error details: ${JSON.stringify(lastError, null, 2)}`);
-    const errorMsg = lastError?.message || String(lastError);
+  try {
+    dlog(`Launching browser with headless=${headlessMode}...`);
+    
+    browser = await puppeteer.launch({
+      headless: headlessMode,
+      executablePath: executablePath,
+      args: launchArgs,
+      defaultViewport: { width: 1440, height: 900 },
+      timeout: 120000,
+      ignoreHTTPSErrors: true
+    });
+    dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
+  } catch (launchError) {
+    dlog(`❌ Browser launch failed`);
+    dlog(`Error: ${launchError?.message}`);
+    dlog(`Error details: ${JSON.stringify(launchError, null, 2)}`);
+    const errorMsg = launchError?.message || String(launchError);
     throw new Error(`Failed to launch the browser process! ${errorMsg}\n\nTROUBLESHOOTING: https://pptr.dev/troubleshooting`);
   }
 

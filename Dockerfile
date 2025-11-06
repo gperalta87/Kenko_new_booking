@@ -35,17 +35,10 @@ RUN apt-get update && apt-get install -y \
 # ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
 # ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-# Disable X11 and D-Bus for headless mode
-ENV DISPLAY=:99
-ENV XAUTHORITY=/tmp/Xauthority
-ENV DEBIAN_FRONTEND=noninteractive
-# Prevent Chromium from trying to use X11
-ENV LIBGL_ALWAYS_SOFTWARE=1
-ENV GALLIUM_DRIVER=llvmpipe
-
 # Railway-specific environment
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
@@ -59,12 +52,8 @@ RUN npm install --only=production
 # Copy source code
 COPY . .
 
-# Make startup script executable
-RUN chmod +x start.sh
-
 # Expose port
 EXPOSE 3000
 
-# Start xvfb and then the application using the startup script
-# Use shell form to ensure output is captured
-CMD /bin/bash -c "./start.sh"
+# Start the application
+CMD ["node", "server.js"]
