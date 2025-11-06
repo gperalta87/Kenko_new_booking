@@ -266,6 +266,7 @@ async function bookClass({
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
+    ...(headless ? ["--headless=new"] : []), // Explicitly set headless mode
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--disable-gpu",
@@ -325,9 +326,10 @@ async function bookClass({
     // Log current DISPLAY value before unsetting
     const displayBefore = process.env.DISPLAY || 'not set';
     dlog(`DISPLAY before unset: ${displayBefore}`);
-    // Unset DISPLAY to force Chromium to use headless backend (not X11)
-    delete process.env.DISPLAY;
-    delete process.env.XAUTHORITY;
+    // Force unset DISPLAY and related env vars to prevent X11 detection
+    // Setting to empty string is more reliable than delete in some environments
+    process.env.DISPLAY = '';
+    process.env.XAUTHORITY = '';
     // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';

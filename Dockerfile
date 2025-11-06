@@ -39,6 +39,11 @@ RUN apt-get update && apt-get install -y \
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DEBIAN_FRONTEND=noninteractive
+# Ensure DISPLAY is not set to prevent X11 detection in headless mode
+ENV DISPLAY=""
+ENV XAUTHORITY=""
+ENV DBUS_SESSION_BUS_ADDRESS=""
+ENV DBUS_SYSTEM_BUS_ADDRESS=""
 
 WORKDIR /app
 
