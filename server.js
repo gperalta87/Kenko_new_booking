@@ -355,10 +355,12 @@ async function bookClass({
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
   // Set environment variables to prevent X11 initialization BEFORE launching browser
-  // This must be done before Puppeteer tries to launch Chromium
+  // In true headless mode, Chromium shouldn't need DISPLAY
   if (headless) {
-    process.env.DISPLAY = ':99';
-    process.env.XAUTHORITY = '/tmp/Xauthority';
+    // Unset DISPLAY for true headless mode - Chromium's headless mode doesn't need X11
+    // xvfb is still running in the background as a fallback, but we don't tell Chromium about it
+    delete process.env.DISPLAY;
+    delete process.env.XAUTHORITY;
     // Prevent Chromium from trying to use X11
     process.env.LIBGL_ALWAYS_SOFTWARE = '1';
     process.env.GALLIUM_DRIVER = 'llvmpipe';
@@ -367,15 +369,11 @@ async function bookClass({
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
     // Force headless mode
     process.env.CHROME_DEVEL_SANDBOX = '';
-    dlog(`Set environment variables for headless mode: DISPLAY=${process.env.DISPLAY}`);
+    dlog(`Unset DISPLAY for true headless mode - Chromium should use headless backend`);
     
-    // Wait a moment for xvfb to be ready (if it was just started)
-    // Check if DISPLAY is accessible
-    if (process.env.DISPLAY) {
-      dlog(`Waiting for X server at ${process.env.DISPLAY} to be ready...`);
-      await new Promise(resolve => setTimeout(resolve, 3000)); // 3 second delay
-      dlog(`Proceeding with browser launch`);
-    }
+    // Small delay to ensure everything is ready
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    dlog(`Proceeding with browser launch`);
   }
   
   // For Railway/headless mode, try different headless modes
