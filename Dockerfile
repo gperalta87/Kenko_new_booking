@@ -60,5 +60,10 @@ COPY . .
 # Expose port
 EXPOSE 3000
 
+# Start xvfb to provide virtual X server for Chromium
+# This prevents Chromium from trying to connect to a real X server
+RUN echo '#!/bin/sh\nXvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &\nexport DISPLAY=:99\nsleep 2\nexec "$@"' > /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
+
 # Start the application
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["node", "server.js"]

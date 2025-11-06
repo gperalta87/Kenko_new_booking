@@ -339,23 +339,29 @@ async function bookClass({
   dlog(`Headless mode: ${headless}`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // For headless mode, ensure DISPLAY is NOT set so Chromium uses true headless backend
-  // Puppeteer's bundled Chromium works best in headless mode without X11
+  // For headless mode, ensure DISPLAY is properly configured
+  // If xvfb is running (DISPLAY=:99), keep it set. Otherwise, unset it for true headless.
   if (headless) {
-    // Log current DISPLAY value before unsetting
+    // Log current DISPLAY value
     const displayBefore = process.env.DISPLAY || 'not set';
-    dlog(`DISPLAY before unset: ${displayBefore}`);
-    // Force unset DISPLAY and related env vars to prevent X11 detection
-    // Setting to empty string is more reliable than delete in some environments
-    process.env.DISPLAY = '';
-    process.env.XAUTHORITY = '';
+    dlog(`DISPLAY before check: ${displayBefore}`);
+    
+    // If DISPLAY is set to :99, xvfb is running - keep it set
+    // Otherwise, unset DISPLAY to force Chromium to use headless backend
+    if (process.env.DISPLAY !== ':99') {
+      process.env.DISPLAY = '';
+      process.env.XAUTHORITY = '';
+      dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore})`);
+    } else {
+      dlog(`Using xvfb virtual X server - DISPLAY=${process.env.DISPLAY}`);
+    }
+    
     // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
     // Additional environment variables to prevent X11 detection
     process.env.LIBGL_ALWAYS_SOFTWARE = '1';
     process.env.GALLIUM_DRIVER = 'llvmpipe';
-    dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore}), Chromium will use headless backend`);
   }
   
   // Use headless: 'new' mode (most stable) for headless, false for local testing
