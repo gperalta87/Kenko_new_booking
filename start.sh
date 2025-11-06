@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Immediate test to verify script is running
+echo "=== START.SH SCRIPT IS RUNNING ==="
+echo "=== Current directory: $(pwd) ==="
+echo "=== Current user: $(whoami) ==="
+echo "=== DISPLAY before: ${DISPLAY} ==="
+
 # Start xvfb in the background
 echo "=== Starting Xvfb on display :99... ==="
 Xvfb :99 -screen 0 1024x768x24 -ac +extension GLX +render -noreset > /tmp/xvfb.log 2>&1 &
