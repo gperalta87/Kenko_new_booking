@@ -250,17 +250,34 @@ async function bookClass({
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
   
   // Determine Chromium executable path
-  // Priority: 1) Environment variable, 2) Puppeteer's bundled Chromium (default), 3) System Chromium
+  // Priority: 1) Environment variable, 2) System Chromium (for Railway), 3) Puppeteer's bundled Chromium
   let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH;
   if (!executablePath) {
     if (process.platform === 'darwin' && !headless) {
       // macOS local - use system Chrome/Chromium
       executablePath = undefined;
+    } else if (headless) {
+      // For Railway/containerized environments, try system Chromium first (works better with xvfb)
+      // Fallback to Puppeteer's bundled Chromium if system Chromium not found
+      const systemChromiumPaths = ['/usr/bin/chromium', '/usr/bin/chromium-browser'];
+      const fs = require('fs');
+      for (const path of systemChromiumPaths) {
+        try {
+          if (fs.existsSync(path)) {
+            executablePath = path;
+            dlog(`Using system Chromium at: ${executablePath}`);
+            break;
+          }
+        } catch (e) {
+          // Continue to next path
+        }
+      }
+      if (!executablePath) {
+        executablePath = undefined; // Let Puppeteer use its bundled Chromium
+        dlog(`System Chromium not found, using Puppeteer's bundled Chromium`);
+      }
     } else {
-      // For Railway/containerized environments, use Puppeteer's bundled Chromium by default
-      // This is more compatible with headless mode and doesn't require X11
-      executablePath = undefined; // Let Puppeteer use its bundled Chromium
-      dlog(`Using Puppeteer's bundled Chromium (no executablePath specified)`);
+      executablePath = undefined;
     }
   } else {
     dlog(`Using custom Chromium path: ${executablePath}`);

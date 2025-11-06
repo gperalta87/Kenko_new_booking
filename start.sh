@@ -8,7 +8,7 @@ XVFB_PID=$!
 
 # Wait for Xvfb to be ready
 echo "Waiting for Xvfb to be ready..."
-sleep 2
+sleep 5
 
 # Verify Xvfb is running
 if ! kill -0 $XVFB_PID 2>/dev/null; then
@@ -27,11 +27,8 @@ export GALLIUM_DRIVER=llvmpipe
 export DBUS_SESSION_BUS_ADDRESS=""
 export DBUS_SYSTEM_BUS_ADDRESS=""
 
-# Verify Xvfb is accessible
-echo "Verifying X server is accessible..."
-if ! xdpyinfo -display :99 >/dev/null 2>&1; then
-    echo "WARNING: X server may not be fully ready, but continuing..."
-fi
+# Give Xvfb more time to fully initialize
+echo "X server should be ready now"
 
 # Start Node.js application
 echo "Starting Node.js application..."
