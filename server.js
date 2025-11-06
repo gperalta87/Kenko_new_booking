@@ -4,6 +4,7 @@ import express from "express";
 import puppeteer from "puppeteer";
 import fs from "fs";
 import path from "path";
+import { spawn } from "child_process";
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -248,6 +249,31 @@ async function bookClass({
   // Allow showing browser window for local testing
   // Set HEADLESS=false or pass DEBUG=true to see the browser
   const headless = process.env.HEADLESS !== 'false' && !DEBUG;
+  
+  // Start xvfb if running in headless mode on Linux (Railway/containerized environment)
+  let xvfbProcess = null;
+  if (process.platform === 'linux' && headless) {
+    try {
+      dlog("=== Starting xvfb from Node.js ===");
+      // Set DISPLAY if not already set
+      if (!process.env.DISPLAY) {
+        process.env.DISPLAY = ':99';
+        dlog("=== Set DISPLAY=:99 ===");
+      }
+      xvfbProcess = spawn('Xvfb', [':99', '-screen', '0', '1024x768x24', '-ac', '+extension', 'GLX', '+render', '-noreset'], {
+        stdio: 'ignore',
+        detached: true
+      });
+      xvfbProcess.unref(); // Allow Node.js to exit independently
+      dlog(`=== xvfb started (PID: ${xvfbProcess.pid}) ===`);
+      // Wait a moment for xvfb to initialize
+      await sleep(3000);
+      dlog("=== xvfb should be ready now ===");
+    } catch (error) {
+      dlog(`=== Warning: Could not start xvfb: ${error.message} ===`);
+      // Continue anyway - maybe xvfb is already running
+    }
+  }
   
   // Determine Chromium executable path
   // Use Puppeteer's bundled Chromium for better headless support
