@@ -59,8 +59,11 @@ RUN npm install --only=production
 # Copy source code
 COPY . .
 
+# Make startup script executable
+RUN chmod +x start.sh
+
 # Expose port
 EXPOSE 3000
 
-# Start xvfb and then the application
-CMD Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 & node server.js
+# Start xvfb and then the application using the startup script
+CMD ["./start.sh"]
