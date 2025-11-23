@@ -2431,13 +2431,195 @@ async function bookClass({
 
     // Step 8: Search for customer
     await step("Search for customer", async () => {
-      await fillInput(page, [
+      const customerSearchValue = CUSTOMER_NAME.toLowerCase();
+      dlog(`Typing customer name character by character: ${customerSearchValue}`);
+      
+      // Find the customer search input field
+      const customerInputSelectors = [
         '::-p-aria(Search customer)',
         'div.customer-overlay input',
         '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/input)',
-        ':scope >>> div.customer-overlay input'
-      ], CUSTOMER_NAME.toLowerCase(), { debug: DEBUG });
-      await sleep(2000); // Wait for autocomplete dropdown to appear
+        ':scope >>> div.customer-overlay input',
+        'input[placeholder*="customer" i]',
+        'input[type="text"]'
+      ];
+      
+      let foundInputSelector = null;
+      for (const selector of customerInputSelectors) {
+        try {
+          const element = await page.$(selector);
+          if (element) {
+            const isVisible = await element.isVisible().catch(() => false);
+            if (isVisible) {
+              foundInputSelector = selector;
+              dlog(`Found customer search input with selector: ${selector}`);
+              break;
+            }
+          }
+        } catch (e) {
+          continue;
+        }
+      }
+      
+      if (!foundInputSelector) {
+        throw new Error(`Could not find customer search input field`);
+      }
+      
+      // Clear any existing text first
+      await page.click(foundInputSelector, { clickCount: 3 }); // Triple click to select all
+      await page.keyboard.press('Backspace');
+      await sleep(100);
+      
+      // Click and focus the input to ensure it's active
+      await page.click(foundInputSelector);
+      await sleep(100);
+      await page.focus(foundInputSelector);
+      await sleep(150);
+      
+      // Trigger focus event to ensure autocomplete is listening
+      await page.evaluate((selector) => {
+        const input = document.querySelector(selector);
+        if (input) {
+          input.focus();
+          input.dispatchEvent(new Event('focus', { bubbles: true }));
+        }
+      }, foundInputSelector);
+      
+      await sleep(100);
+      
+      // Type character by character with realistic delays and event dispatching
+      dlog(`Typing "${customerSearchValue}" character by character (realistic typing for autocomplete)...`);
+      
+      for (let i = 0; i < customerSearchValue.length; i++) {
+        const char = customerSearchValue[i];
+        const baseDelay = 50 + Math.random() * 50; // 50-100ms between characters
+        
+        // 1. Keydown event
+        await page.evaluate((selector, c) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const keydownEvent = new KeyboardEvent('keydown', { 
+              bubbles: true, 
+              cancelable: true, 
+              key: c,
+              code: `Key${c.toUpperCase()}`
+            });
+            input.dispatchEvent(keydownEvent);
+          }
+        }, foundInputSelector, char);
+        
+        await sleep(baseDelay * 0.3);
+        
+        // 2. Keypress event
+        await page.evaluate((selector, c) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const keypressEvent = new KeyboardEvent('keypress', { 
+              bubbles: true, 
+              cancelable: true, 
+              key: c,
+              charCode: c.charCodeAt(0)
+            });
+            input.dispatchEvent(keypressEvent);
+          }
+        }, foundInputSelector, char);
+        
+        await sleep(baseDelay * 0.2);
+        
+        // 3. Actually type the character using keyboard.type()
+        await page.keyboard.type(char, { delay: 0 });
+        
+        await sleep(baseDelay * 0.2);
+        
+        // 4. Input event (fires when value changes)
+        await page.evaluate((selector) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+            Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+            input.dispatchEvent(inputEvent);
+          }
+        }, foundInputSelector);
+        
+        await sleep(baseDelay * 0.2);
+        
+        // 5. Composition events (for better autocomplete triggering)
+        if (i === 0) {
+          await page.evaluate((selector) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              input.dispatchEvent(new Event('compositionstart', { bubbles: true }));
+            }
+          }, foundInputSelector);
+        }
+        
+        if (i === customerSearchValue.length - 1) {
+          await page.evaluate((selector) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              input.dispatchEvent(new Event('compositionend', { bubbles: true }));
+            }
+          }, foundInputSelector);
+        }
+        
+        await sleep(baseDelay * 0.1);
+        
+        // 6. Keyup event
+        await page.evaluate((selector, c) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const keyupEvent = new KeyboardEvent('keyup', { 
+              bubbles: true, 
+              cancelable: true, 
+              key: c
+            });
+            input.dispatchEvent(keyupEvent);
+          }
+        }, foundInputSelector, char);
+        
+        // Wait between characters
+        await sleep(baseDelay);
+      }
+      
+      dlog("✓ Finished typing customer name character by character");
+      
+      // Wait for autocomplete dropdown to appear (increased wait time)
+      await sleep(2000);
+      
+      // Take screenshot to verify autocomplete appeared
+      await takeScreenshot('after-customer-search-typing');
+      
+      // Verify autocomplete dropdown appeared
+      const autocompleteVisible = await page.evaluate(() => {
+        // Look for common autocomplete dropdown patterns
+        const selectors = [
+          'div.search-container > div > div',
+          '[role="listbox"]',
+          '[class*="autocomplete"]',
+          '[class*="dropdown"]',
+          '[class*="suggestion"]',
+          'div[class*="search"] > div'
+        ];
+        
+        for (const sel of selectors) {
+          const elements = Array.from(document.querySelectorAll(sel));
+          for (const el of elements) {
+            if (el.offsetParent !== null && el.textContent && el.textContent.toLowerCase().includes('fitpass')) {
+              return true;
+            }
+          }
+        }
+        return false;
+      }).catch(() => false);
+      
+      if (autocompleteVisible) {
+        dlog("✓ Autocomplete dropdown is visible");
+      } else {
+        logToFile("⚠ WARNING: Autocomplete dropdown may not be visible after typing");
+        dlog("⚠ WARNING: Autocomplete dropdown may not be visible after typing");
+        // Wait a bit more
+        await sleep(1000);
+      }
     });
 
     // Step 10: Select customer from results
