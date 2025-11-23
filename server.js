@@ -478,23 +478,60 @@ async function bookClass({
   // This plugin handles most anti-scraping detection automatically
   dlog("Stealth plugin is active (puppeteer-extra-plugin-stealth)");
   
-  // Set realistic viewport (stealth plugin handles User-Agent and other properties)
+  // CRITICAL: Set User-Agent to match local Chrome EXACTLY (Chrome 131 on macOS)
+  // Railway needs to look exactly like a local Chrome browser, not headless
+  // The API checks User-Agent and may reject headless browsers or different versions
+  const realChromeUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+  await page.setUserAgent(realChromeUA);
+  dlog(`Set User-Agent to match local Chrome exactly: ${realChromeUA}`);
+  logToFile(`[BROWSER] User-Agent set to match local: ${realChromeUA}`);
+  
+  // Set realistic viewport (stealth plugin handles other properties)
   await page.setViewport({
     width: 1920,
     height: 1080,
     deviceScaleFactor: 1,
   });
   
-  // Set extra headers to look like a real browser
+  // Set extra headers to match local Chrome exactly
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
     'Upgrade-Insecure-Requests': '1',
     'Sec-Fetch-Site': 'none',
     'Sec-Fetch-Mode': 'navigate',
     'Sec-Fetch-User': '?1',
     'Sec-Fetch-Dest': 'document',
+    'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'sec-ch-ua-platform-version': '"14.1.0"',
+    'sec-ch-ua-arch': '"x86"',
+    'sec-ch-ua-bitness': '"64"',
+  });
+  
+  // Override navigator properties to match local Chrome (not headless)
+  await page.evaluateOnNewDocument(() => {
+    // Override platform to match local
+    Object.defineProperty(navigator, 'platform', {
+      get: () => 'MacIntel',
+    });
+    
+    // Override hardwareConcurrency (headless often shows different values)
+    Object.defineProperty(navigator, 'hardwareConcurrency', {
+      get: () => 8, // Common Mac value
+    });
+    
+    // Override deviceMemory
+    Object.defineProperty(navigator, 'deviceMemory', {
+      get: () => 8,
+    });
+    
+    // Override webdriver to ensure it's undefined (stealth plugin should do this, but double-check)
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => undefined,
+    });
   });
   
   // Override permissions (for both domains)
