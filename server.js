@@ -1386,10 +1386,14 @@ async function bookClass({
 
     // Step 5: Submit login
     await step("Submit login", async () => {
-      const promises = [];
-      const startWaitingForEvents = () => {
-        promises.push(page.waitForNavigation({ waitUntil: "networkidle0", timeout: 15000 }).catch(() => {}));
-      };
+      // Set up navigation wait BEFORE clicking
+      const navigationPromise = page.waitForNavigation({ 
+        waitUntil: "networkidle0", 
+        timeout: 15000 
+      }).catch((e) => {
+        dlog(`Navigation wait error (may be normal): ${e?.message}`);
+        return null; // Don't fail if navigation already completed
+      });
       
       await clickElement(page, [
         '::-p-aria(Sign in)',
@@ -1397,6 +1401,11 @@ async function bookClass({
         '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[3]/button)',
         ':scope >>> form button'
       ], { offset: { x: 274.5, y: 16.3359375 } });
+      
+      // Wait for navigation to complete
+      dlog("Waiting for login navigation...");
+      await navigationPromise;
+      dlog("Login navigation completed");
       
       // Handle potential password re-entry (as in recorded session)
       await sleep(500); // Optimized: reduced from 1000ms
@@ -1417,9 +1426,11 @@ async function bookClass({
         ], password, { debug: DEBUG });
         await page.keyboard.down('Enter');
         await page.keyboard.up('Enter');
-        await Promise.all(promises);
+        // Wait for second navigation if needed
+        await page.waitForNavigation({ waitUntil: "networkidle0", timeout: 15000 }).catch(() => {});
       }
-      await sleep(500); // Wait for navigation
+      
+      await sleep(500); // Wait for page to stabilize
       await takeScreenshot('after-login-submit');
     });
 
