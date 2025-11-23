@@ -24,11 +24,8 @@ RUN apt-get update && apt-get install -y \
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV DEBIAN_FRONTEND=noninteractive
-# Ensure DISPLAY is not set to prevent X11 detection in headless mode
-ENV DISPLAY=""
-ENV XAUTHORITY=""
-ENV DBUS_SESSION_BUS_ADDRESS=""
-ENV DBUS_SYSTEM_BUS_ADDRESS=""
+# Note: We don't set DISPLAY/XAUTHORITY/DBUS vars here - let the code delete them if they exist
+# Setting them to empty strings still creates the variables, which Chromium can detect
 
 WORKDIR /app
 
