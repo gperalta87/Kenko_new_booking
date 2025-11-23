@@ -112,7 +112,7 @@ async function clickElement(page, selectors, options = {}) {
             await element.click();
           }
           clicked = true; // Mark as clicked
-          await sleep(200);
+          await sleep(100); // Optimized: reduced from 200ms
           dlog(`Successfully clicked using selector: ${selector}`);
           return true;
         }
@@ -754,11 +754,11 @@ async function bookClass({
         // Clear any existing text first
         await page.click(foundSelector, { clickCount: 3 }); // Triple click to select all
         await page.keyboard.press('Backspace');
-        await sleep(200);
+        await sleep(100); // Optimized: reduced from 200ms
         
         // Focus the input
         await page.focus(foundSelector);
-        await sleep(200);
+        await sleep(100); // Optimized: reduced from 200ms
         
         // CRITICAL: Type character by character using ONLY keyboard.type() to trigger autocomplete
         // Railway needs slower, more realistic typing - don't set value directly, let keyboard.type() do it
@@ -766,9 +766,9 @@ async function bookClass({
         
         // Ensure input is focused and ready - click first to ensure it's active
         await page.click(foundSelector);
-        await sleep(200);
+        await sleep(100); // Optimized: reduced from 200ms
         await page.focus(foundSelector);
-        await sleep(300);
+        await sleep(150); // Optimized: reduced from 300ms
         
         // Trigger focus event to ensure autocomplete is listening
         await page.evaluate((selector) => {
@@ -781,7 +781,7 @@ async function bookClass({
             input.dispatchEvent(new Event('mouseup', { bubbles: true }));
           }
         }, foundSelector);
-        await sleep(300);
+        await sleep(150); // Optimized: reduced from 300ms
         
         // CRITICAL: Type each character with FULL event sequence (keydown -> keypress -> input -> keyup)
         // This simulates REAL human typing - Railway needs this level of realism to trigger autocomplete
@@ -791,10 +791,10 @@ async function bookClass({
           const char = gymNameLower[i];
           const charCode = char.charCodeAt(0);
           
-          // Generate random delay between characters (humans don't type at constant speed)
-          // Base delay: 300-500ms, with occasional longer pauses
-          const baseDelay = 300 + Math.random() * 200;
-          const occasionalPause = Math.random() < 0.2 ? 400 : 0; // 20% chance of longer pause
+          // Generate random delay between characters (optimized for maximum speed)
+          // Base delay: 50-100ms (very fast typing)
+          const baseDelay = 50 + Math.random() * 50;
+          const occasionalPause = Math.random() < 0.05 ? 100 : 0; // 5% chance of longer pause
           const delay = baseDelay + occasionalPause;
           
           dlog(`Typing character ${i+1}/${gymNameLower.length}: "${char}" (delay: ${Math.round(delay)}ms)`);
@@ -815,7 +815,7 @@ async function bookClass({
               input.dispatchEvent(keyDownEvent);
             }
           }, foundSelector, char, charCode);
-          await sleep(50 + Math.random() * 50); // Small random delay
+          await sleep(20 + Math.random() * 30); // Optimized: reduced delay
           
           // 2. KeyPress event
           await page.evaluate((selector, char, charCode) => {
@@ -832,7 +832,7 @@ async function bookClass({
               input.dispatchEvent(keyPressEvent);
             }
           }, foundSelector, char, charCode);
-          await sleep(30 + Math.random() * 30);
+          await sleep(15 + Math.random() * 15); // Optimized: reduced delay
           
           // 3. Actually type the character using keyboard (this sets the value)
           await page.keyboard.type(char, { delay: 0 }); // No delay here, we control timing manually
@@ -846,7 +846,7 @@ async function bookClass({
               input.dispatchEvent(inputEvent);
             }
           }, foundSelector);
-          await sleep(50 + Math.random() * 50);
+          await sleep(20 + Math.random() * 30); // Optimized: reduced delay
           
           // 5. KeyUp event
           await page.evaluate((selector, char, charCode) => {
@@ -865,8 +865,8 @@ async function bookClass({
           }, foundSelector, char, charCode);
           
           // Wait between characters - Railway needs time for autocomplete to process
-          // Longer wait after first few characters (when autocomplete typically starts)
-          const waitTime = i < 3 ? 800 + Math.random() * 400 : 600 + Math.random() * 300;
+          // Optimized for speed: minimal wait between characters
+          const waitTime = i < 3 ? 150 + Math.random() * 100 : 100 + Math.random() * 100;
           await sleep(waitTime);
         }
         
@@ -883,7 +883,7 @@ async function bookClass({
             input.dispatchEvent(compositionEndEvent);
           }
         }, foundSelector);
-        await sleep(800);
+        await sleep(100); // Optimized: minimal wait after typing
         
         dlog("✓ Finished typing with keyboard.type() only");
         
@@ -900,27 +900,28 @@ async function bookClass({
         // Remove network listener (Puppeteer uses off() instead of removeListener())
         page.off('request', requestHandler);
         
-        // Additional wait after completing typing - Railway needs more time for autocomplete
-        await sleep(5000); // Increased wait for Railway autocomplete to appear
+        // Wait exactly 1 second after typing before clicking studio (optimized)
+        dlog("Waiting 1 second after typing before clicking studio...");
+        await sleep(1000);
       } else {
         // Fallback: try to use the element directly
         dlog("Using element-based typing as fallback");
         await inputElement.click({ clickCount: 3 }); // Triple click to select all
         await page.keyboard.press('Backspace');
-        await sleep(200);
+        await sleep(100); // Optimized: reduced from 200ms
         
         // Focus the input
         await inputElement.focus();
-        await sleep(200);
+        await sleep(100); // Optimized: reduced from 200ms
         
         // CRITICAL: Type character by character with FULL event sequence (same as main method)
         dlog(`Typing "${gymNameLower}" with full event sequence (Railway-optimized, ultra-realistic, fallback)...`);
         
         // Ensure input is focused and ready - click first to ensure it's active
         await inputElement.click();
-        await sleep(200);
+        await sleep(100); // Optimized: reduced from 200ms
         await inputElement.focus();
-        await sleep(300);
+        await sleep(150); // Optimized: reduced from 300ms
         
         // Trigger focus event to ensure autocomplete is listening
         await page.evaluate(() => {
@@ -934,16 +935,16 @@ async function bookClass({
             input.dispatchEvent(new Event('mouseup', { bubbles: true }));
           }
         });
-        await sleep(300);
+        await sleep(150); // Optimized: reduced from 300ms
         
         // Type each character with FULL event sequence (keydown -> keypress -> input -> keyup)
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
           const charCode = char.charCodeAt(0);
           
-          // Generate random delay between characters
-          const baseDelay = 300 + Math.random() * 200;
-          const occasionalPause = Math.random() < 0.2 ? 400 : 0;
+          // Generate random delay between characters (optimized for maximum speed)
+          const baseDelay = 50 + Math.random() * 50;
+          const occasionalPause = Math.random() < 0.05 ? 100 : 0;
           const delay = baseDelay + occasionalPause;
           
           dlog(`[FALLBACK] Typing character ${i+1}/${gymNameLower.length}: "${char}" (delay: ${Math.round(delay)}ms)`);
@@ -1016,7 +1017,8 @@ async function bookClass({
           }, char, charCode);
           
           // Wait between characters
-          const waitTime = i < 3 ? 800 + Math.random() * 400 : 600 + Math.random() * 300;
+          // Optimized for speed: minimal wait between characters
+          const waitTime = i < 3 ? 150 + Math.random() * 100 : 100 + Math.random() * 100;
           await sleep(waitTime);
         }
         
@@ -1354,13 +1356,14 @@ async function bookClass({
         '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[1]/div[2]/input)',
         ':scope >>> form > div:nth-of-type(1) input'
       ], { offset: { x: 211.5, y: 1.3359375 } });
-      await sleep(200);
+      await sleep(100); // Optimized: reduced from 200ms
       await fillInput(page, [
         '::-p-aria(name@example.com)',
         'form > div:nth-of-type(1) input',
         '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[1]/div[2]/input)',
         ':scope >>> form > div:nth-of-type(1) input'
       ], email, { debug: DEBUG });
+      await takeScreenshot('after-email-entry');
     });
 
     // Step 4: Fill password
@@ -1371,13 +1374,14 @@ async function bookClass({
         '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[2]/div[2]/input)',
         ':scope >>> form > div:nth-of-type(2) input'
       ], { offset: { x: 200.5, y: 26.3359375 } });
-      await sleep(200);
+      await sleep(100); // Optimized: reduced from 200ms
       await fillInput(page, [
         '::-p-aria(Password)',
         'form > div:nth-of-type(2) input',
         '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[2]/div[2]/input)',
         ':scope >>> form > div:nth-of-type(2) input'
       ], password, { debug: DEBUG });
+      await takeScreenshot('after-password-entry');
     });
 
     // Step 5: Submit login
@@ -1395,7 +1399,7 @@ async function bookClass({
       ], { offset: { x: 274.5, y: 16.3359375 } });
       
       // Handle potential password re-entry (as in recorded session)
-      await sleep(1000);
+      await sleep(500); // Optimized: reduced from 1000ms
       const passwordInput = await page.$('form > div:nth-of-type(2) input');
       if (passwordInput) {
         dlog("Password re-entry detected, filling again");
@@ -1404,7 +1408,7 @@ async function bookClass({
           '::-p-xpath(/html/body/div/div/div)',
           ':scope >>> body > div > div > div'
         ], { offset: { x: 55.5, y: 344.3359375 } });
-        await sleep(500);
+        await sleep(300); // Optimized: reduced from 500ms
         await fillInput(page, [
           '::-p-aria(Password)',
           'form > div:nth-of-type(2) input',
@@ -1415,6 +1419,8 @@ async function bookClass({
         await page.keyboard.up('Enter');
         await Promise.all(promises);
       }
+      await sleep(500); // Wait for navigation
+      await takeScreenshot('after-login-submit');
     });
 
     // Step 6: Navigate to target month/year, find target date column, then find and click class
@@ -1444,11 +1450,12 @@ async function bookClass({
       
       // Wait for calendar to load
       await page.waitForSelector('mwl-calendar-week-view, div.calendar, [class*="calendar"], p-dropdown', { visible: true, timeout: TIMEOUT });
-      await sleep(1000);
+      await sleep(500); // Optimized: reduced from 1000ms
+      await takeScreenshot('before-date-navigation');
       
-      // Add delay before clicking dropdown - page needs time to fully load
-      dlog(`Waiting 2 seconds for page to fully load before clicking dropdown...`);
-      await sleep(2000);
+      // Add delay before clicking dropdown - page needs time to fully load (optimized)
+      dlog(`Waiting 1 second for page to fully load before clicking dropdown...`);
+      await sleep(1000); // Optimized: reduced from 2000ms
       
       // Step 1: Click dropdown to switch to Day view (using page.evaluate for reliability)
       dlog(`Step 1: Clicking view dropdown to select Day view...`);
@@ -1695,18 +1702,32 @@ async function bookClass({
         dlog(`✓ Successfully clicked dropdown using method: ${dropdownClicked.method}`);
       }
       
-      // Give the dropdown time to open
+      // Give the dropdown time to open (optimized: reduced from 1000ms to 300ms)
       dlog(`Waiting for dropdown menu to open...`);
-      await sleep(1000);
+      await sleep(300);
       
-      // Wait for dropdown menu to appear - check multiple times
+      // Wait for dropdown menu to appear - check multiple times (optimized: 5 attempts × 200ms = 1s max)
       dlog(`Checking if dropdown menu appeared...`);
       let dropdownReady = false;
-      for (let attempt = 0; attempt < 10; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         dropdownReady = await page.evaluate(() => {
-          // Check if dropdown menu is visible
-          const dropdown = document.querySelector('#pr_id_2_list, [role="listbox"], p-dropdownitem, p-dropdownitem span');
-          return dropdown !== null && dropdown.offsetParent !== null;
+          // More aggressive search for dropdown with multiple selectors
+          const selectors = [
+            '#pr_id_2_list',
+            '[role="listbox"]',
+            'p-dropdownitem',
+            '.p-dropdown-panel',
+            '[class*="dropdown-panel"]',
+            'p-dropdownitem span'
+          ];
+          
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el && el.offsetParent !== null) {
+              return true;
+            }
+          }
+          return false;
         }).catch(() => false);
         
         if (dropdownReady) {
@@ -1714,19 +1735,21 @@ async function bookClass({
           break;
         }
         
-        if (attempt < 9) {
-          dlog(`Waiting for dropdown menu... (attempt ${attempt + 1}/10)`);
-          await sleep(500);
+        if (attempt < 4) {
+          dlog(`Waiting for dropdown menu... (attempt ${attempt + 1}/5)`);
+          await sleep(200); // Optimized: reduced from 500ms to 200ms
         }
       }
       
       if (!dropdownReady) {
-        dlog(`⚠ Dropdown menu not found after 10 attempts, but continuing to try clicking Day option...`);
+        dlog(`⚠ Dropdown menu not found after 5 attempts, but continuing to try clicking Day option...`);
+        await takeScreenshot('date-nav-dropdown-not-found');
       }
-      await sleep(500);
+      await sleep(200); // Optimized: reduced from 500ms to 200ms
       
       // Step 2: Click "Day" option using page.evaluate (more reliable)
       dlog(`Step 2: Clicking "Day" option...`);
+      await takeScreenshot('before-clicking-day-option');
       
       const dayClicked = await page.evaluate(() => {
         // Method 1: Try ID selector from Puppeteer recording
@@ -2441,7 +2464,7 @@ async function bookClass({
           dlog(`⚠ Click may not have registered - no booking dialog detected, but continuing...`);
         }
         
-        await sleep(1500);
+        await sleep(800); // Optimized: reduced from 1500ms
       } else {
         dlog(`✗ Could not find class at ${targetTime}`);
         dlog(`  Reason: ${classInfo.reason}`);
@@ -2478,7 +2501,7 @@ async function bookClass({
         ':scope >>> div.booking-btn > button',
         '::-p-text(Book Customer)'
       ], { offset: { x: 61, y: 8.3828125 } });
-      await sleep(1000);
+      await sleep(500); // Optimized: reduced from 1000ms
     });
 
     // Step 8: Search for customer
@@ -2489,7 +2512,7 @@ async function bookClass({
         '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/input)',
         ':scope >>> div.customer-overlay input'
       ], CUSTOMER_NAME.toLowerCase(), { debug: DEBUG });
-      await sleep(1000);
+      await sleep(500); // Optimized: reduced from 1000ms
     });
 
     // Step 10: Select customer from results
@@ -2540,13 +2563,13 @@ async function bookClass({
         logToFile(warningMsg);
         console.error(warningMsg);
       }
-      await sleep(1000);
+      await sleep(500); // Optimized: reduced from 1000ms
     });
 
     // Step 11: Wait for booking modal to fully load after selecting customer
     await step("Wait for booking modal", async () => {
       dlog(`Waiting for booking modal to fully load after selecting customer...`);
-      await sleep(2000);
+      await sleep(1000); // Optimized: reduced from 2000ms
       
       // Check if the modal is visible and what buttons/options are available
       const modalState = await page.evaluate(() => {
@@ -2588,8 +2611,8 @@ async function bookClass({
       const clicksBefore = clickCounter;
       dlog(`Looking for BOOK USING CREDITS button to confirm booking...`);
       
-      // Wait a bit to ensure modal is fully loaded
-      await sleep(1500);
+      // Wait a bit to ensure modal is fully loaded (optimized)
+      await sleep(800); // Optimized: reduced from 1500ms
       
       // Try to find and click the button using exact selectors from Puppeteer recording
       // Recording shows: ::-p-aria(Calendar Button BOOK USING CREDITS), XPath, div.customer-overlay button
@@ -2706,14 +2729,10 @@ async function bookClass({
       await takeScreenshot('after-book-using-credits-click');
       logToFile(`[BOOK BUTTON] Screenshot taken immediately after clicking BOOK USING CREDITS button`);
       
-      // Wait for booking to be processed
-      await sleep(2000);
+      // Minimal wait for booking to be processed (optimized for speed)
+      await sleep(500);
       
-      // Take another screenshot after waiting to see if notifications appear
-      await takeScreenshot('after-book-using-credits-wait');
-      logToFile(`[BOOK BUTTON] Screenshot taken after 2 second wait`);
-      
-      // Verify the booking was processed - check if booking completed or if we need to continue
+      // Verify the booking was processed - check if booking completed
       dlog(`Checking booking status after clicking BOOK USING CREDITS...`);
       const bookingState = await page.evaluate(() => {
         // Look for success messages
@@ -2726,26 +2745,18 @@ async function bookClass({
         const modal = document.querySelector('[class*="modal"], [class*="dialog"], [class*="overlay"]');
         const modalOpen = modal && modal.offsetParent !== null;
         
-        // Look for payment/charge buttons (might need to continue)
-        const chargeButton = Array.from(document.querySelectorAll('button')).find(btn => 
-          btn.textContent?.includes('Charge') || btn.getAttribute('aria-label')?.includes('Charge')
-        );
-        
         return {
           hasSuccess,
-          modalOpen,
-          hasChargeButton: chargeButton !== undefined && chargeButton.offsetParent !== null
+          modalOpen
         };
-      }).catch(() => ({ hasSuccess: false, modalOpen: true, hasChargeButton: false }));
+      }).catch(() => ({ hasSuccess: false, modalOpen: true }));
       
-      if (bookingState.hasSuccess) {
-        dlog(`✓ Booking appears to be successful!`);
-      } else if (!bookingState.modalOpen) {
-        dlog(`✓ Modal closed - booking may have completed`);
-      } else if (bookingState.hasChargeButton) {
-        dlog(`Charge button appeared - continuing with payment steps...`);
-      } else {
-        dlog(`⚠ No explicit confirmation found, booking may have completed or may need additional steps`);
+      if (bookingState.hasSuccess || !bookingState.modalOpen) {
+        dlog(`✓ Booking appears to be successful! Closing browser immediately...`);
+        // Close browser immediately after successful booking
+        await page.close().catch(() => {});
+        await browser.close().catch(() => {});
+        return { bookingComplete: true, hasSuccess: true };
       }
       
       // Return the booking state so we can conditionally skip Charge step
@@ -2822,17 +2833,35 @@ async function bookClass({
       ], { offset: { x: 108, y: 19.5 } });
       
       dlog(`Charge button clicked, waiting for booking to be processed...`);
-      await sleep(2000);
+      await sleep(500); // Optimized: reduced wait time
       
-      // Wait for booking confirmation/success indicators
+      // Check immediately if booking is confirmed
+      const immediateCheck = await page.evaluate(() => {
+        const bodyText = document.body.textContent || '';
+        const hasSuccess = bodyText.toLowerCase().includes('success') ||
+                           bodyText.toLowerCase().includes('booked') ||
+                           bodyText.toLowerCase().includes('confirmed');
+        const modal = document.querySelector('[class*="modal"], [class*="dialog"], [class*="overlay"]');
+        const modalOpen = modal && modal.offsetParent !== null;
+        return { hasSuccess, modalOpen };
+      }).catch(() => ({ hasSuccess: false, modalOpen: true }));
+      
+      if (immediateCheck.hasSuccess || !immediateCheck.modalOpen) {
+        dlog(`✓ Booking confirmed immediately after Charge! Closing browser...`);
+        await page.close().catch(() => {});
+        await browser.close().catch(() => {});
+        return; // Exit early - booking complete
+      }
+      
+      // Wait for booking confirmation/success indicators (optimized: reduced attempts)
       dlog(`Checking for booking confirmation...`);
       
       let bookingConfirmed = false;
       let confirmationMessage = null;
       let bookingId = null;
       
-      // Wait up to 15 seconds for confirmation
-      for (let attempt = 0; attempt < 15; attempt++) {
+      // Wait up to 5 seconds for confirmation (optimized: reduced from 15 seconds)
+      for (let attempt = 0; attempt < 5; attempt++) {
         await sleep(1000);
         
         const status = await page.evaluate(() => {
@@ -2881,23 +2910,29 @@ async function bookClass({
           bookingConfirmed = true;
           confirmationMessage = status.message;
           bookingId = status.bookingId;
-          dlog(`✓ Booking confirmed!`);
+          dlog(`✓ Booking confirmed! Closing browser immediately...`);
           dlog(`  Confirmation message: ${confirmationMessage || 'Found in page'}`);
           if (bookingId) {
             dlog(`  Booking ID: ${bookingId}`);
           }
+          // Close browser immediately after confirmation
+          await page.close().catch(() => {});
+          await browser.close().catch(() => {});
           break;
         }
         
-        if (status.buttonGone && attempt > 3) {
-          dlog(`Charge button disappeared (attempt ${attempt + 1}/15), booking may be processing...`);
+        if (status.buttonGone && attempt > 1) {
+          dlog(`Charge button disappeared (attempt ${attempt + 1}/5), booking may be processing...`);
         }
         
-        dlog(`Waiting for confirmation... (attempt ${attempt + 1}/15)`);
+        dlog(`Waiting for confirmation... (attempt ${attempt + 1}/5)`);
       }
       
       if (!bookingConfirmed) {
-        dlog(`⚠ No explicit confirmation message found after 15 seconds, but continuing...`);
+        dlog(`⚠ No explicit confirmation message found after 5 seconds, but booking may still be successful. Closing browser...`);
+        // Close browser even if no explicit confirmation (booking likely completed)
+        await page.close().catch(() => {});
+        await browser.close().catch(() => {});
         dlog(`Checking page state...`);
         
         // Final check - take a screenshot and log page state
@@ -3112,8 +3147,18 @@ async function bookClass({
       }
     });
 
-    await page.close().catch(() => {});
-    await browser.close().catch(() => {});
+    // Browser may already be closed if booking completed successfully
+    // Only close here if it wasn't closed earlier (safe to call multiple times)
+    try {
+      await page.close().catch(() => {});
+    } catch (e) {
+      // Page may already be closed
+    }
+    try {
+      await browser.close().catch(() => {});
+    } catch (e) {
+      // Browser may already be closed
+    }
 
     // Log final click summary
     logToFile(`\n[CLICK SUMMARY] Total clicks performed: ${clickCounter}`);
