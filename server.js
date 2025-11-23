@@ -2444,15 +2444,60 @@ async function bookClass({
         'input[type="text"]'
       ];
       
+      let foundInputElement = null;
       let foundInputSelector = null;
+      let browserSelector = null; // Regular CSS selector for use in page.evaluate()
+      
       for (const selector of customerInputSelectors) {
         try {
           const element = await page.$(selector);
           if (element) {
             const isVisible = await element.isVisible().catch(() => false);
             if (isVisible) {
+              foundInputElement = element;
               foundInputSelector = selector;
+              
+              // Get a regular CSS selector that works in browser context
+              // First try to get element attributes to build a selector
+              const elementInfo = await page.evaluate((el) => {
+                return {
+                  id: el.id || '',
+                  className: el.className || '',
+                  tagName: el.tagName.toLowerCase(),
+                  placeholder: el.placeholder || '',
+                  ariaLabel: el.getAttribute('aria-label') || ''
+                };
+              }, element).catch(() => null);
+              
+              // Build browser selector from element info
+              if (elementInfo) {
+                if (elementInfo.id) {
+                  browserSelector = `#${elementInfo.id}`;
+                } else if (elementInfo.className) {
+                  const classes = elementInfo.className.split(' ').filter(c => c).join('.');
+                  browserSelector = `${elementInfo.tagName}.${classes}`;
+                } else if (elementInfo.placeholder) {
+                  browserSelector = `input[placeholder="${elementInfo.placeholder}"]`;
+                } else if (elementInfo.ariaLabel) {
+                  browserSelector = `input[aria-label="${elementInfo.ariaLabel}"]`;
+                }
+              }
+              
+              // Fallback: convert Puppeteer selector to regular CSS selector
+              if (!browserSelector) {
+                if (selector.startsWith('::-p-aria')) {
+                  browserSelector = 'input[aria-label*="customer" i], input[placeholder*="customer" i]';
+                } else if (selector.startsWith('::-p-xpath')) {
+                  browserSelector = 'div.customer-overlay input, input[type="text"]';
+                } else if (!selector.startsWith('::-p-') && !selector.startsWith(':scope')) {
+                  browserSelector = selector;
+                } else {
+                  browserSelector = 'div.customer-overlay input, input[type="text"]';
+                }
+              }
+              
               dlog(`Found customer search input with selector: ${selector}`);
+              dlog(`Browser selector: ${browserSelector}`);
               break;
             }
           }
@@ -2461,19 +2506,23 @@ async function bookClass({
         }
       }
       
-      if (!foundInputSelector) {
+      if (!foundInputElement || !foundInputSelector) {
         throw new Error(`Could not find customer search input field`);
       }
       
+      if (!browserSelector) {
+        browserSelector = 'div.customer-overlay input, input[type="text"]';
+      }
+      
       // Clear any existing text first
-      await page.click(foundInputSelector, { clickCount: 3 }); // Triple click to select all
+      await foundInputElement.click({ clickCount: 3 }); // Triple click to select all
       await page.keyboard.press('Backspace');
       await sleep(100);
       
       // Click and focus the input to ensure it's active
-      await page.click(foundInputSelector);
+      await foundInputElement.click();
       await sleep(100);
-      await page.focus(foundInputSelector);
+      await foundInputElement.focus();
       await sleep(150);
       
       // Trigger focus event to ensure autocomplete is listening
@@ -2483,7 +2532,7 @@ async function bookClass({
           input.focus();
           input.dispatchEvent(new Event('focus', { bubbles: true }));
         }
-      }, foundInputSelector);
+      }, browserSelector);
       
       await sleep(100);
       
@@ -2506,7 +2555,7 @@ async function bookClass({
             });
             input.dispatchEvent(keydownEvent);
           }
-        }, foundInputSelector, char);
+        }, browserSelector, char);
         
         await sleep(baseDelay * 0.3);
         
@@ -2522,7 +2571,7 @@ async function bookClass({
             });
             input.dispatchEvent(keypressEvent);
           }
-        }, foundInputSelector, char);
+        }, browserSelector, char);
         
         await sleep(baseDelay * 0.2);
         
@@ -2539,7 +2588,7 @@ async function bookClass({
             Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
             input.dispatchEvent(inputEvent);
           }
-        }, foundInputSelector);
+        }, browserSelector);
         
         await sleep(baseDelay * 0.2);
         
@@ -2550,7 +2599,7 @@ async function bookClass({
             if (input) {
               input.dispatchEvent(new Event('compositionstart', { bubbles: true }));
             }
-          }, foundInputSelector);
+          }, browserSelector);
         }
         
         if (i === customerSearchValue.length - 1) {
@@ -2559,7 +2608,7 @@ async function bookClass({
             if (input) {
               input.dispatchEvent(new Event('compositionend', { bubbles: true }));
             }
-          }, foundInputSelector);
+          }, browserSelector);
         }
         
         await sleep(baseDelay * 0.1);
@@ -2575,7 +2624,7 @@ async function bookClass({
             });
             input.dispatchEvent(keyupEvent);
           }
-        }, foundInputSelector, char);
+        }, browserSelector, char);
         
         // Wait between characters
         await sleep(baseDelay);
