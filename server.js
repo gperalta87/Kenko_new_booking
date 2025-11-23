@@ -1938,38 +1938,93 @@ async function bookClass({
         await sleep(1500);
       }
       
-      // Step 3: Click date range picker (converted from Puppeteer recording to standard selectors)
-      dlog(`Step 3: Clicking date range picker...`);
+      // Step 3: Click date button in the center (shows current date like "Nov 23, 2025")
+      dlog(`Step 3: Clicking date button in center...`);
+      await takeScreenshot('before-clicking-date-button');
       
-      // Try XPath first (from Puppeteer recording)
+      // Find the date button by looking for elements containing the date format
       let datePickerClicked = false;
+      
+      // Method 1: Try to find button/div containing date text (Nov 23, 2025 format)
       try {
-        const xpathSelector = '/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div/div[1]/div[2]/div[3]';
-        const [datePickerElement] = await page.$x(xpathSelector);
-        if (datePickerElement) {
-          const isVisible = await datePickerElement.isVisible().catch(() => false);
-          if (isVisible) {
-            await datePickerElement.click({ offset: { x: 93.6015625, y: 24.25 } });
-            dlog(`✓ Clicked date range picker using XPath`);
-            datePickerClicked = true;
-      await sleep(1000);
+        const dateButton = await page.evaluate(() => {
+          // Look for buttons or clickable divs in the header area that contain date text
+          const allElements = Array.from(document.querySelectorAll('button, div, span'));
+          for (const el of allElements) {
+            if (el.offsetParent === null) continue;
+            const text = (el.textContent || '').trim();
+            // Match date formats like "Nov 23, 2025" or "November 23, 2025"
+            if (text.match(/\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}\b/i)) {
+              // Check if it's in the header/center area (not in sidebar)
+              const rect = el.getBoundingClientRect();
+              const centerX = window.innerWidth / 2;
+              // Date button should be roughly in the center of the screen
+              if (Math.abs(rect.left + rect.width / 2 - centerX) < 300) {
+                return {
+                  found: true,
+                  tag: el.tagName,
+                  text: text,
+                  x: rect.left + rect.width / 2,
+                  y: rect.top + rect.height / 2
+                };
+              }
+            }
           }
+          return { found: false };
+        }).catch(() => ({ found: false }));
+        
+        if (dateButton.found) {
+          dlog(`Found date button: "${dateButton.text}" at (${dateButton.x}, ${dateButton.y})`);
+          await page.mouse.click(dateButton.x, dateButton.y);
+          dlog(`✓ Clicked date button using text search`);
+          datePickerClicked = true;
+          await sleep(1000);
         }
       } catch (e) {
-        dlog(`XPath selector failed, trying CSS selectors: ${e?.message}`);
+        dlog(`Date button text search failed: ${e?.message}`);
       }
       
-      // Fallback to CSS selectors if XPath didn't work
+      // Method 2: Try XPath from Puppeteer recording (if Method 1 didn't work)
       if (!datePickerClicked) {
+        try {
+          const xpathSelector = '/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div/div[1]/div[2]/div[3]';
+          const [datePickerElement] = await page.$x(xpathSelector);
+          if (datePickerElement) {
+            const isVisible = await datePickerElement.isVisible().catch(() => false);
+            if (isVisible) {
+              await datePickerElement.click({ offset: { x: 93.6015625, y: 24.25 } });
+              dlog(`✓ Clicked date range picker using XPath`);
+              datePickerClicked = true;
+              await sleep(1000);
+            }
+          }
+        } catch (e) {
+          dlog(`XPath selector failed: ${e?.message}`);
+        }
+      }
+      
+      // Method 3: Fallback to CSS selectors
+      if (!datePickerClicked) {
+        const dateMethodMsg = `[DATE NAV DATE BUTTON] Trying CSS selectors fallback...`;
+        logToFile(dateMethodMsg);
+        dlog(dateMethodMsg);
         await clickElement(page, [
           'div.date-range',
           '[class*="date-range"]',
           '[class*="date-picker"]',
-          'div:has-text("Nov")',
+          'button:has-text("Nov")',
+          'button:has-text("2025")',
+          'div:has-text("Nov 23")',
           'div:has-text("2025")'
         ], { offset: { x: 93.6015625, y: 24.25 }, debug: DEBUG });
         await sleep(1000);
+      } else {
+        const dateMethodMsg = `[DATE NAV DATE BUTTON] Successfully clicked date button`;
+        logToFile(dateMethodMsg);
+        dlog(`✓ ${dateMethodMsg}`);
       }
+      
+      await takeScreenshot('after-clicking-date-button');
       
       // Step 4: Navigate date picker to target date and click it
       dlog(`Step 4: Navigating date picker to ${month}/${day}/${year}...`);
