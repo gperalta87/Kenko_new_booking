@@ -669,19 +669,43 @@ async function bookClass({
       // Use page.type() like in the reference code
       dlog("Clicking on gym name input field");
       
-      // Set up network monitoring for autocomplete API calls BEFORE typing
+      // Set up network monitoring AND response interception for autocomplete API calls
       const autocompleteRequests = [];
+      const autocompleteResponses = [];
+      
       const requestHandler = (request) => {
         const url = request.url();
-        if (url.includes('search') || url.includes('autocomplete') || url.includes('gym') || url.includes('business') || url.includes('location')) {
+        if (url.includes('search') || url.includes('autocomplete') || url.includes('gym') || url.includes('business') || url.includes('location') || url.includes('partner')) {
           dlog(`[NETWORK] Autocomplete request detected: ${url.substring(0, 150)}`);
           autocompleteRequests.push({
             url: url,
+            method: request.method(),
+            postData: request.postData(),
             timestamp: Date.now()
           });
         }
       };
+      
+      const responseHandler = async (response) => {
+        const url = response.url();
+        if (url.includes('search') || url.includes('autocomplete') || url.includes('gym') || url.includes('business') || url.includes('location') || url.includes('partner')) {
+          try {
+            const responseData = await response.json().catch(() => null);
+            dlog(`[NETWORK] Autocomplete response: ${url.substring(0, 150)}`);
+            logToFile(`[NETWORK] Response data: ${JSON.stringify(responseData).substring(0, 500)}`);
+            autocompleteResponses.push({
+              url: url,
+              data: responseData,
+              timestamp: Date.now()
+            });
+          } catch (e) {
+            // Response might not be JSON
+          }
+        }
+      };
+      
       page.on('request', requestHandler);
+      page.on('response', responseHandler);
       
       const gymNameLower = gymName.toLowerCase();
       dlog(`Typing gym name character by character: ${gymNameLower}`);
@@ -1134,8 +1158,70 @@ async function bookClass({
         await sleep(1000);
       }
       
+      // Log network requests/responses for debugging
+      if (autocompleteRequests.length > 0) {
+        logToFile(`[NETWORK] Detected ${autocompleteRequests.length} autocomplete requests during typing`);
+        autocompleteRequests.forEach((req, i) => {
+          logToFile(`[NETWORK] Request ${i+1}: ${req.method} ${req.url.substring(0, 150)}`);
+        });
+      } else {
+        logToFile(`[NETWORK] WARNING: No autocomplete API requests detected - autocomplete may not be triggering`);
+      }
+      
+      if (autocompleteResponses.length > 0) {
+        logToFile(`[NETWORK] Detected ${autocompleteResponses.length} autocomplete responses`);
+        autocompleteResponses.forEach((resp, i) => {
+          logToFile(`[NETWORK] Response ${i+1}: ${resp.url.substring(0, 150)}`);
+          if (resp.data) {
+            logToFile(`[NETWORK] Response data keys: ${Object.keys(resp.data).join(', ')}`);
+          }
+        });
+      }
+      
+      // Remove network listeners
+      page.off('request', requestHandler);
+      page.off('response', responseHandler);
+      
       if (!suggestionVisible) {
-        logToFile(`[GYM SELECTION] WARNING: Suggestion not visible after waiting, proceeding anyway`);
+        logToFile(`[GYM SELECTION] WARNING: Suggestion not visible after waiting`);
+        
+        // Try to find the gym suggestion element even if it's hidden or not visible
+        dlog(`[GYM SELECTION] Attempting to find gym suggestion element (including hidden elements)...`);
+        const gymElement = await page.evaluate((gymName) => {
+          const searchText = gymName.toLowerCase();
+          const allElements = Array.from(document.querySelectorAll('*'));
+          
+          // Look for elements containing the gym name
+          const candidates = allElements.filter(el => {
+            const text = (el.textContent || '').trim().toLowerCase();
+            return text === searchText || text.includes(searchText);
+          });
+          
+          // Prefer visible elements, but also check hidden ones
+          const visible = candidates.find(el => el.offsetParent !== null);
+          if (visible) return { found: true, selector: visible.tagName + (visible.id ? '#' + visible.id : '') + (visible.className ? '.' + visible.className.split(' ')[0] : '') };
+          
+          // If no visible element, try to find and make visible
+          const hidden = candidates.find(el => {
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && (el.offsetParent !== null || style.visibility === 'visible');
+          });
+          
+          if (hidden) {
+            // Try to make it visible
+            hidden.style.display = 'block';
+            hidden.style.visibility = 'visible';
+            hidden.style.opacity = '1';
+            return { found: true, selector: hidden.tagName + (hidden.id ? '#' + hidden.id : '') };
+          }
+          
+          return { found: false };
+        }, gymName).catch(() => ({ found: false }));
+        
+        if (gymElement.found) {
+          logToFile(`[GYM SELECTION] Found gym element (possibly hidden): ${gymElement.selector}`);
+          suggestionVisible = true;
+        }
       }
       
       try {
@@ -1144,6 +1230,41 @@ async function bookClass({
           throw new Error('Could not find gym input element');
         }
         
+        // If suggestion is visible, try to click it directly
+        if (suggestionVisible) {
+          dlog(`[GYM SELECTION] Attempting to click visible suggestion element...`);
+          const clicked = await page.evaluate((gymName) => {
+            const searchText = gymName.toLowerCase();
+            const allElements = Array.from(document.querySelectorAll('*'));
+            const suggestion = allElements.find(el => {
+              const text = (el.textContent || '').trim().toLowerCase();
+              return (text === searchText || text.includes(searchText)) && el.offsetParent !== null;
+            });
+            
+            if (suggestion) {
+              suggestion.click();
+              return true;
+            }
+            return false;
+          }, gymName).catch(() => false);
+          
+          if (clicked) {
+            logToFile(`[GYM SELECTION] Successfully clicked suggestion element directly`);
+            await sleep(2000);
+            // Verify we moved past gym selection
+            const stillOnGymPage = await page.evaluate(() => {
+              const input = document.querySelector('input[type="text"], input[type="search"]');
+              return input && input.value && input.value.toLowerCase().includes('ponte');
+            }).catch(() => false);
+            
+            if (!stillOnGymPage) {
+              await takeScreenshot('gym-after-selection');
+              return; // Success!
+            }
+          }
+        }
+        
+        // Fallback: Click directly below the input (original method)
         const box = await inputElement.boundingBox();
         if (!box) {
           throw new Error('Could not get bounding box for gym input element');
