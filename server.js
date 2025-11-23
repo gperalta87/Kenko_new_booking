@@ -247,7 +247,9 @@ async function bookClass({
   
   // Allow showing browser window for local testing
   // Set HEADLESS=false or pass DEBUG=true to see the browser
-  const headless = process.env.HEADLESS !== 'false' && !DEBUG;
+  // For Railway testing, you can also set SHOW_BROWSER=true in environment variables
+  const showBrowser = process.env.SHOW_BROWSER === 'true' || process.env.HEADLESS === 'false' || DEBUG;
+  const headless = !showBrowser;
   
   // Determine Chromium executable path
   // Use Puppeteer's bundled Chromium (best headless support, no X11 dependencies)
@@ -266,11 +268,8 @@ async function bookClass({
     "--no-sandbox",
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
-    ...(headless ? [
-      "--headless=new", // Explicitly set headless mode
-      "--disable-gpu", // Must be before other flags
-      "--disable-software-rasterizer",
-    ] : []),
+    "--disable-gpu", // Always disable GPU in containers
+    "--disable-software-rasterizer",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--disable-web-security",
@@ -315,28 +314,55 @@ async function bookClass({
     "--safebrowsing-disable-auto-update",
     "--enable-automation",
     "--password-store=basic",
-    "--use-mock-keychain"
+    "--use-mock-keychain",
+    // Additional flags to prevent X11/D-Bus errors in containers
+    "--disable-setuid-sandbox",
+    "--disable-background-networking",
+    "--disable-default-apps",
+    "--disable-sync",
+    "--disable-translate",
+    "--hide-scrollbars",
+    "--mute-audio",
+    "--no-first-run",
+    "--safebrowsing-disable-auto-update",
+    "--ignore-certificate-errors",
+    "--ignore-ssl-errors",
+    "--ignore-certificate-errors-spki-list"
   ];
 
+  // Add headless flag only if running in headless mode
+  if (headless) {
+    launchArgs.push("--headless=new");
+    // For headless mode, add single-process flag for better container compatibility
+    launchArgs.push("--single-process");
+  }
+
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
-  dlog(`Headless mode: ${headless}`);
+  dlog(`Headless mode: ${headless} (showBrowser: ${showBrowser})`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
 
-  // For headless mode, ensure DISPLAY is NOT set so Chromium uses true headless backend
+  // For headless mode, ensure DISPLAY and D-Bus env vars are properly unset
   // Puppeteer's bundled Chromium works best in headless mode without X11
   if (headless) {
     const displayBefore = process.env.DISPLAY || 'not set';
-    dlog(`DISPLAY before unset: ${displayBefore}`);
-    // Unset DISPLAY to force Chromium to use headless backend (not X11)
+    dlog(`DISPLAY before cleanup: ${displayBefore}`);
+    
+    // Delete environment variables (not just set to empty) to prevent X11 detection
+    if (process.env.DISPLAY) delete process.env.DISPLAY;
+    if (process.env.XAUTHORITY) delete process.env.XAUTHORITY;
+    if (process.env.DBUS_SESSION_BUS_ADDRESS) delete process.env.DBUS_SESSION_BUS_ADDRESS;
+    if (process.env.DBUS_SYSTEM_BUS_ADDRESS) delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
+    
+    // Also set to empty strings as fallback
     process.env.DISPLAY = '';
     process.env.XAUTHORITY = '';
-    // Disable D-Bus to prevent connection errors
     process.env.DBUS_SESSION_BUS_ADDRESS = '';
     process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
-    dlog(`Using true headless mode - DISPLAY unset (was: ${displayBefore}), Chromium will use headless backend`);
+    
+    dlog(`Using true headless mode - DISPLAY and D-Bus vars cleaned (was: ${displayBefore})`);
   }
   
-  // Use headless: 'new' mode (most stable) for headless, false for local testing
+  // Use headless: 'new' mode (most stable) for headless, false for visible browser
   let browser;
   const headlessMode = headless ? 'new' : false;
   
@@ -349,7 +375,9 @@ async function bookClass({
       args: launchArgs,
       defaultViewport: { width: 1440, height: 900 },
       timeout: 120000,
-      ignoreHTTPSErrors: true
+      ignoreHTTPSErrors: true,
+      // Additional options for better container compatibility
+      protocolTimeout: 120000
     });
     dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
   } catch (launchError) {
