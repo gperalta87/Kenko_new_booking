@@ -3047,40 +3047,101 @@ async function bookClass({
       }
       
       // Wait a bit for selection to register
-      await sleep(1000);
+      await sleep(1500);
       
-      // Verify customer was selected
-      const customerSelectedCheck = await page.evaluate(() => {
-        // Check if customer name appears in the input or selected area
+      // Take screenshot immediately after clicking customer
+      await takeScreenshot('after-customer-click-attempt');
+      
+      // STRICT VALIDATION: Verify customer was actually selected
+      // Check multiple indicators that customer was selected
+      const customerSelectedCheck = await page.evaluate((customerName) => {
+        const results = {
+          customerInInput: false,
+          customerNameVisible: false,
+          bookButtonVisible: false,
+          dropdownClosed: false,
+          customerText: null,
+          bookButtonText: null
+        };
+        
+        // Check 1: Customer name appears in input field (dropdown should be closed)
         const inputs = Array.from(document.querySelectorAll('input'));
         for (const input of inputs) {
           if (input.offsetParent === null) continue;
           const value = (input.value || '').toLowerCase();
           if (value.includes('fitpass')) {
-            return true;
+            results.customerInInput = true;
+            results.customerText = input.value;
+            break;
           }
         }
         
-        // Check if "BOOK USING CREDITS" button appeared (indicates customer selected)
+        // Check 2: Customer name is visible somewhere in the selected area
+        const allText = (document.body.textContent || '').toLowerCase();
+        if (allText.includes('fitpass') && (allText.includes('one') || allText.includes('nadia'))) {
+          results.customerNameVisible = true;
+        }
+        
+        // Check 3: "BOOK USING CREDITS" button appeared (indicates customer selected)
         const bookButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
           if (btn.offsetParent === null) return false;
-          const text = (btn.textContent || '').toLowerCase();
-          return text.includes('book using credits') || text.includes('book using');
+          const text = (btn.textContent || '').trim().toLowerCase();
+          return text === 'book using credits' || text.includes('book using credits') || text.includes('book using');
         });
         
-        return bookButton !== undefined;
-      }).catch(() => false);
+        if (bookButton) {
+          results.bookButtonVisible = true;
+          results.bookButtonText = bookButton.textContent;
+        }
+        
+        // Check 4: Dropdown is closed (autocomplete dropdown should disappear after selection)
+        const dropdowns = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"]'));
+        const visibleDropdowns = dropdowns.filter(d => d.offsetParent !== null && (d.textContent || '').toLowerCase().includes('fitpass'));
+        results.dropdownClosed = visibleDropdowns.length === 0;
+        
+        return results;
+      }, CUSTOMER_NAME).catch(() => ({
+        customerInInput: false,
+        customerNameVisible: false,
+        bookButtonVisible: false,
+        dropdownClosed: false,
+        customerText: null,
+        bookButtonText: null
+      }));
       
-      if (!customerSelectedCheck) {
-        logToFile(`⚠ WARNING: Customer selection may not have registered - BOOK USING CREDITS button not found`);
-        dlog(`⚠ WARNING: Customer selection may not have registered`);
-      } else {
-        dlog(`✓ Customer selection verified - BOOK USING CREDITS button is visible`);
+      // Log validation results
+      logToFile(`[CUSTOMER SELECTION VALIDATION]`);
+      logToFile(`  Customer in input: ${customerSelectedCheck.customerInInput} (${customerSelectedCheck.customerText || 'N/A'})`);
+      logToFile(`  Customer name visible: ${customerSelectedCheck.customerNameVisible}`);
+      logToFile(`  BOOK USING CREDITS button visible: ${customerSelectedCheck.bookButtonVisible} (${customerSelectedCheck.bookButtonText || 'N/A'})`);
+      logToFile(`  Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
+      
+      dlog(`[CUSTOMER SELECTION VALIDATION]`);
+      dlog(`  Customer in input: ${customerSelectedCheck.customerInInput}`);
+      dlog(`  Customer name visible: ${customerSelectedCheck.customerNameVisible}`);
+      dlog(`  BOOK USING CREDITS button visible: ${customerSelectedCheck.bookButtonVisible}`);
+      dlog(`  Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
+      
+      // REQUIRE at least one strong indicator that customer was selected
+      const customerDefinitelySelected = customerSelectedCheck.bookButtonVisible || 
+                                         (customerSelectedCheck.customerInInput && customerSelectedCheck.dropdownClosed);
+      
+      if (!customerDefinitelySelected) {
+        logToFile(`❌ ERROR: Customer selection validation FAILED!`);
+        logToFile(`  Required: BOOK USING CREDITS button visible OR (customer in input AND dropdown closed)`);
+        logToFile(`  Actual: bookButtonVisible=${customerSelectedCheck.bookButtonVisible}, customerInInput=${customerSelectedCheck.customerInInput}, dropdownClosed=${customerSelectedCheck.dropdownClosed}`);
+        
+        // Take screenshot of failure state
+        await takeScreenshot('customer-selection-validation-failed');
+        
+        throw new Error(`Customer selection validation failed - customer was not properly selected. BOOK USING CREDITS button not found: ${customerSelectedCheck.bookButtonVisible}, Customer in input: ${customerSelectedCheck.customerInInput}, Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
       }
       
-      // Take screenshot immediately after selecting customer to see if booking was triggered
-      await takeScreenshot('after-customer-selection');
-      logToFile(`[CUSTOMER SELECTION] Screenshot taken after customer selection`);
+      logToFile(`✓ Customer selection VALIDATED successfully`);
+      dlog(`✓ Customer selection VALIDATED successfully`);
+      
+      // Take screenshot after successful validation
+      await takeScreenshot('after-customer-selection-validated');
       
       // Check if booking was automatically triggered
       const autoBookingCheck = await page.evaluate(() => {
@@ -3159,113 +3220,158 @@ async function bookClass({
       logToFile(`[BOOK BUTTON] Starting BOOK USING CREDITS click. Current click count: ${clickCounter}`);
       dlog(`[BOOK BUTTON] Starting BOOK USING CREDITS click. Current click count: ${clickCounter}`);
       const clicksBefore = clickCounter;
-      dlog(`Looking for BOOK USING CREDITS button to confirm booking...`);
       
-      // Wait a bit to ensure modal is fully loaded (optimized)
-      await sleep(800); // Optimized: reduced from 1500ms
+      // Take screenshot before looking for button
+      await takeScreenshot('before-looking-for-book-button');
       
-      // Try to find and click the button using exact selectors from Puppeteer recording
-      // Recording shows: ::-p-aria(Calendar Button BOOK USING CREDITS), XPath, div.customer-overlay button
-      // Offset: x: 318, y: 20.5
-      dlog(`Using exact selectors from Puppeteer recording...`);
+      // Wait a bit to ensure modal is fully loaded
+      await sleep(1500);
       
-      // First try using exact XPath from recording
-      // CRITICAL: Use a flag to ensure we only click ONCE, even if multiple selectors match the same button
-      const clicked = await page.evaluate(() => {
-        let buttonClicked = false; // Guard to prevent double-clicks
-        let buttonElement = null;
+      // STRICT VALIDATION: Verify "BOOK USING CREDITS" button is visible before attempting to click
+      dlog(`Validating that BOOK USING CREDITS button is visible...`);
+      const bookButtonValidation = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+        const bookButtons = [];
         
-        // Try XPath from Puppeteer recording first
-        const xpath = '/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div[6]/div/button';
-        try {
-          const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-          const button = result.singleNodeValue;
+        for (const btn of buttons) {
+          if (btn.offsetParent === null) continue;
+          const text = (btn.textContent || '').trim();
+          const textLower = text.toLowerCase();
           
-          if (button && button.offsetParent !== null) {
-            buttonElement = button;
-            console.log(`[BROWSER CLICK] BOOK USING CREDITS - Found button via XPath`);
-          }
-        } catch (e) {
-          console.log(`[BROWSER] XPath failed: ${e?.message}`);
-        }
-        
-        // Fallback: try aria-label from recording (only if XPath didn't find it)
-        if (!buttonElement) {
-          const ariaButton = document.querySelector('[aria-label*="Calendar Button BOOK USING CREDITS"], [aria-label*="BOOK USING CREDITS"]');
-          if (ariaButton && ariaButton.offsetParent !== null) {
-            buttonElement = ariaButton;
-            console.log(`[BROWSER CLICK] BOOK USING CREDITS - Found button via aria-label`);
-          }
-        }
-        
-        // Fallback: try CSS selector from recording (only if previous methods didn't find it)
-        if (!buttonElement) {
-          const cssButton = document.querySelector('div.customer-overlay button');
-          if (cssButton && cssButton.offsetParent !== null) {
-            const text = cssButton.textContent || '';
-            if (text.includes('BOOK USING CREDITS') || text.includes('BOOK USING')) {
-              buttonElement = cssButton;
-              console.log(`[BROWSER CLICK] BOOK USING CREDITS - Found button via CSS selector`);
-            }
+          if (textLower.includes('book using credits') || 
+              textLower.includes('book using') ||
+              textLower === 'book using credits') {
+            const rect = btn.getBoundingClientRect();
+            bookButtons.push({
+              text: text,
+              visible: true,
+              x: rect.left + rect.width / 2,
+              y: rect.top + rect.height / 2,
+              tagName: btn.tagName,
+              className: btn.className,
+              ariaLabel: btn.getAttribute('aria-label') || ''
+            });
           }
         }
         
-        // CRITICAL: Only click ONCE, regardless of which selector found it
-        if (buttonElement && !buttonClicked) {
-          console.log(`[BROWSER CLICK] BOOK USING CREDITS - Clicking button ONCE (no duplicates)`);
-          buttonElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          buttonElement.click();
-          buttonClicked = true;
-          return true;
-        }
-        
-        if (!buttonElement) {
-          console.log(`[BROWSER] BOOK USING CREDITS button not found`);
-        }
-        return false;
-      }).catch(() => false);
+        return {
+          found: bookButtons.length > 0,
+          count: bookButtons.length,
+          buttons: bookButtons
+        };
+      }).catch(() => ({ found: false, count: 0, buttons: [] }));
       
-      await sleep(500);
-      
-      // Log clicks made in this step
-      const clicksBeforeBook = clickCounter;
-      
-      // If page.evaluate didn't work, try Puppeteer native click with exact selectors and offset
-      if (!clicked) {
-        dlog(`Button not found via page.evaluate, trying Puppeteer native click with exact selectors...`);
+      if (!bookButtonValidation.found || bookButtonValidation.count === 0) {
+        logToFile(`❌ ERROR: BOOK USING CREDITS button NOT FOUND!`);
+        logToFile(`  Searched all buttons on page, found ${bookButtonValidation.count} matching buttons`);
         
-        // Try CSS selector from recording with exact offset
-        try {
-          await page.waitForSelector('div.customer-overlay button', { visible: true, timeout: 5000 });
-          const cssButton = await page.$('div.customer-overlay button');
-          
-          if (cssButton) {
-            const isVisible = await cssButton.isVisible().catch(() => false);
-            if (isVisible) {
-              const text = await cssButton.evaluate(el => el.textContent || '').catch(() => '');
-              if (text.includes('BOOK USING CREDITS') || text.includes('BOOK USING')) {
-                dlog(`Found BOOK USING CREDITS button via CSS selector: ${text.substring(0, 50)}`);
-                logClick('BOOK USING CREDITS button', 'div.customer-overlay button', 'Puppeteer.click(offset)');
-                await cssButton.scrollIntoView();
-                await sleep(300);
-                
-                // Use exact offset from recording: x: 318, y: 20.5
-                await cssButton.click({ offset: { x: 318, y: 20.5 } });
-                dlog(`✓ Clicked BOOK USING CREDITS button with exact offset (318, 20.5) from recording`);
-                clicked = true;
-              }
-            }
-          }
-        } catch (e) {
-          dlog(`Puppeteer native click failed: ${e?.message}`);
-        }
-      } else {
-        logClick('BOOK USING CREDITS button', 'page.evaluate', 'element.click()');
-        dlog(`✓ Successfully clicked BOOK USING CREDITS button via page.evaluate`);
+        // Take screenshot of failure state
+        await takeScreenshot('book-button-not-found');
+        
+        // Log all visible buttons for debugging
+        const allButtons = await page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+          return buttons
+            .filter(btn => btn.offsetParent !== null)
+            .map(btn => ({
+              text: (btn.textContent || '').trim().substring(0, 50),
+              tagName: btn.tagName,
+              className: btn.className.substring(0, 50)
+            }))
+            .slice(0, 20); // First 20 buttons
+        }).catch(() => []);
+        
+        logToFile(`  Visible buttons on page (first 20):`);
+        allButtons.forEach((btn, i) => {
+          logToFile(`    ${i + 1}. "${btn.text}" (${btn.tagName}, ${btn.className})`);
+        });
+        
+        throw new Error(`BOOK USING CREDITS button not found - cannot proceed with booking. Customer may not have been selected properly.`);
       }
       
+      logToFile(`✓ BOOK USING CREDITS button found: "${bookButtonValidation.buttons[0].text}"`);
+      dlog(`✓ BOOK USING CREDITS button found: "${bookButtonValidation.buttons[0].text}"`);
+      dlog(`  Button position: (${bookButtonValidation.buttons[0].x}, ${bookButtonValidation.buttons[0].y})`);
+      dlog(`  Button tag: ${bookButtonValidation.buttons[0].tagName}, class: ${bookButtonValidation.buttons[0].className}`);
+      
+      // Use the validated button to click it directly by coordinates (most reliable)
+      dlog(`Clicking BOOK USING CREDITS button using validated coordinates...`);
+      const validatedButton = bookButtonValidation.buttons[0];
+      
+      try {
+        await page.mouse.click(validatedButton.x, validatedButton.y);
+        logClick('BOOK USING CREDITS button', `mouse.click(${validatedButton.x}, ${validatedButton.y})`, 'Puppeteer.mouse.click(coordinates)');
+        dlog(`✓ Clicked BOOK USING CREDITS button using coordinates`);
+      } catch (e) {
+        dlog(`Coordinate click failed: ${e?.message}, trying selectors...`);
+        
+        // Fallback to selector-based click
+        await clickElement(page, [
+          `::-p-text(${validatedButton.text})`,
+          '::-p-aria(Calendar Button BOOK USING CREDITS)',
+          'div.customer-overlay button',
+          '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div[6]/div/button)'
+        ], { offset: { x: 318, y: 20.5 }, location: 'BOOK USING CREDITS button', debug: DEBUG });
+      }
+      
+      await sleep(1000);
+      
+      // Take screenshot after clicking
+      await takeScreenshot('after-book-using-credits-click');
+      
+      // Verify button was clicked (button should disappear or modal should change)
+      const clickVerified = await page.evaluate(() => {
+        // Check if button still exists (should disappear after click)
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+        const bookButtonStillExists = buttons.some(btn => {
+          if (btn.offsetParent === null) return false;
+          const text = (btn.textContent || '').trim().toLowerCase();
+          return text.includes('book using credits');
+        });
+        
+        // Check if Charge button appeared (indicates we're on next step)
+        const chargeButton = buttons.find(btn => {
+          if (btn.offsetParent === null) return false;
+          const text = (btn.textContent || '').trim().toLowerCase();
+          return text.includes('charge');
+        });
+        
+        return {
+          buttonStillExists: bookButtonStillExists,
+          chargeButtonVisible: chargeButton !== undefined,
+          chargeButtonText: chargeButton ? chargeButton.textContent : null
+        };
+      }).catch(() => ({ buttonStillExists: true, chargeButtonVisible: false, chargeButtonText: null }));
+      
+      if (clickVerified.chargeButtonVisible) {
+        logToFile(`✓ BOOK USING CREDITS button clicked successfully - Charge button is now visible`);
+        dlog(`✓ BOOK USING CREDITS button clicked successfully - Charge button is now visible: "${clickVerified.chargeButtonText}"`);
+      } else if (!clickVerified.buttonStillExists) {
+        logToFile(`✓ BOOK USING CREDITS button clicked successfully - button disappeared`);
+        dlog(`✓ BOOK USING CREDITS button clicked successfully - button disappeared`);
+      } else {
+        logToFile(`⚠ WARNING: BOOK USING CREDITS button still exists after click - may not have registered`);
+        dlog(`⚠ WARNING: BOOK USING CREDITS button still exists after click`);
+        // Wait a bit more and check again
+        await sleep(1000);
+        const retryCheck = await page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+          return buttons.some(btn => {
+            if (btn.offsetParent === null) return false;
+            const text = (btn.textContent || '').trim().toLowerCase();
+            return text.includes('charge');
+          });
+        }).catch(() => false);
+        
+        if (!retryCheck) {
+          logToFile(`❌ ERROR: Charge button not found after clicking BOOK USING CREDITS - click may have failed`);
+          throw new Error(`BOOK USING CREDITS button click may have failed - Charge button not found`);
+        }
+      }
+      
+      // Log clicks made in this step
       const clicksAfterBook = clickCounter;
-      const clicksMade = clicksAfterBook - clicksBeforeBook;
+      const clicksMade = clicksAfterBook - clicksBefore;
       const bookButtonLogMsg = `[BOOK BUTTON] Completed. Clicks made in this step: ${clicksMade}, Total clicks so far: ${clickCounter}`;
       logToFile(bookButtonLogMsg);
       dlog(bookButtonLogMsg);
@@ -3274,10 +3380,6 @@ async function bookClass({
         logToFile(warningMsg);
         console.error(warningMsg);
       }
-      
-      // CRITICAL: Take screenshot immediately after clicking to capture double-booking
-      await takeScreenshot('after-book-using-credits-click');
-      logToFile(`[BOOK BUTTON] Screenshot taken immediately after clicking BOOK USING CREDITS button`);
       
       // Minimal wait for booking to be processed (optimized for speed)
       await sleep(500);
@@ -3788,4 +3890,5 @@ try {
   console.error("Stack:", error.stack);
   // Don't exit - let Railway see the error and restart
 }
+
 
