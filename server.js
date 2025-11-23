@@ -380,12 +380,23 @@ async function bookClass({
   
   dlog(`Environment variables cleaned - DISPLAY was: ${displayBefore}, now deleted`);
   
-  // Use headless: 'new' mode (most stable) for headless, false for visible browser
+  // Use headless: true for Railway/containers (more reliable), 'new' for local, false for visible browser
   let browser;
-  const headlessMode = headless ? 'new' : false;
+  // On Railway/production, use true instead of 'new' for better compatibility
+  const headlessMode = headless ? (isProduction ? true : 'new') : false;
   
   try {
     dlog(`Launching browser with headless=${headlessMode}...`);
+    
+    // Ensure environment is clean before launching - spawn with clean env
+    // Save current env, clean it, launch, then restore
+    const originalEnv = { ...process.env };
+    
+    // Remove X11/D-Bus vars from process.env before launch
+    delete process.env.DISPLAY;
+    delete process.env.XAUTHORITY;
+    delete process.env.DBUS_SESSION_BUS_ADDRESS;
+    delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
     
     browser = await puppeteer.launch({
       headless: headlessMode,
@@ -397,6 +408,10 @@ async function bookClass({
       // Additional options for better container compatibility
       protocolTimeout: 120000
     });
+    
+    // Restore original env (though we'll keep them deleted)
+    // Don't restore DISPLAY/XAUTHORITY/DBUS vars
+    
     dlog(`✓ Browser launched successfully with headless=${headlessMode}`);
   } catch (launchError) {
     dlog(`❌ Browser launch failed`);
