@@ -2258,7 +2258,15 @@ async function bookClass({
                 dlog(`  Clicking using selector: ${classInfo.selector}`);
                 await element.scrollIntoView();
                 await sleep(300);
-                await element.click();
+                
+                // Click at the center of the element, avoiding any buttons inside
+                const box = await element.boundingBox();
+                if (box) {
+                  // Click slightly left of center to avoid delete buttons (usually on the right)
+                  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2);
+                } else {
+                  await element.click();
+                }
                 clicked = true;
                 dlog(`  ✓ Clicked using selector`);
               }
@@ -2295,7 +2303,15 @@ async function bookClass({
                   dlog(`  Found matching element at index ${i}, clicking...`);
                   await element.scrollIntoView();
                   await sleep(300);
-                  await element.click();
+                  
+                  // Click at the center-left of the element to avoid delete buttons
+                  const box = await element.boundingBox();
+                  if (box) {
+                    // Click at 30% from left (avoiding right side where delete buttons usually are)
+                    await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2);
+                  } else {
+                    await element.click();
+                  }
                   clicked = true;
                   dlog(`  ✓ Clicked matching element at index ${i}`);
                   break;
@@ -2329,19 +2345,62 @@ async function bookClass({
               if (eventPeriod === 'am' && eventHour === 12) eventHour24 = 0;
               
               if (eventHour24 === targetHour && eventMinute === targetMinute) {
+                // Make sure we're clicking the main event element, not a delete button inside it
+                // Find the main clickable area (avoid buttons)
+                let clickTarget = event;
+                
+                // Check if event contains buttons - if so, click the main container, not the buttons
+                const buttons = event.querySelectorAll('button, [role="button"], [class*="delete"], [class*="remove"]');
+                if (buttons.length > 0) {
+                  // Click the center of the event, avoiding buttons
+                  const rect = event.getBoundingClientRect();
+                  const centerX = rect.left + rect.width / 2;
+                  const centerY = rect.top + rect.height / 2;
+                  
+                  // Check if center point is over a button
+                  let overButton = false;
+                  for (const btn of buttons) {
+                    const btnRect = btn.getBoundingClientRect();
+                    if (centerX >= btnRect.left && centerX <= btnRect.right &&
+                        centerY >= btnRect.top && centerY <= btnRect.bottom) {
+                      overButton = true;
+                      break;
+                    }
+                  }
+                  
+                  // If center is over a button, click slightly offset
+                  if (overButton) {
+                    const offsetX = rect.left + rect.width * 0.3; // Click left of center
+                    const offsetY = rect.top + rect.height / 2;
+                    const clickEvent = new MouseEvent('click', {
+                      bubbles: true,
+                      cancelable: true,
+                      view: window,
+                      clientX: offsetX,
+                      clientY: offsetY
+                    });
+                    event.dispatchEvent(clickEvent);
+                    return true;
+                  }
+                }
+                
                 // Scroll into view
                 event.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 
-                // Click with multiple methods
-                event.click();
+                // Click the main event element (not buttons inside it)
+                // Use a click at the center of the element
+                const rect = event.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
                 
-                // Also try mouse events
-                const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-                const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
-                const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
+                const clickEvent = new MouseEvent('click', {
+                  bubbles: true,
+                  cancelable: true,
+                  view: window,
+                  clientX: centerX,
+                  clientY: centerY
+                });
                 
-                event.dispatchEvent(mouseDown);
-                event.dispatchEvent(mouseUp);
                 event.dispatchEvent(clickEvent);
                 
                 return true;
@@ -2360,14 +2419,87 @@ async function bookClass({
           dlog(`  ✗ Could not click the element using any method`);
         }
         
-        // Wait for the click to register and check if a booking dialog/modal appeared
+        // Wait for the click to register
         await sleep(500);
+        
+        // Take screenshot immediately after clicking class to see what appeared
+        await takeScreenshot('after-class-click');
+        
+        // Check if a delete modal appeared (this means we clicked the wrong element)
+        const deleteModalAppeared = await page.evaluate(() => {
+          const bodyText = (document.body.textContent || '').toLowerCase();
+          if (bodyText.includes('delete class instance') || bodyText.includes('permanently delete')) {
+            return true;
+          }
+          // Check for delete modal buttons
+          const buttons = Array.from(document.querySelectorAll('button'));
+          for (const btn of buttons) {
+            if (btn.offsetParent === null) continue;
+            const btnText = (btn.textContent || '').toLowerCase();
+            if (btnText.includes('yes, delete') || btnText.includes('delete')) {
+              // Check if it's in a modal context
+              let parent = btn.parentElement;
+              let depth = 0;
+              while (parent && depth < 5) {
+                const parentText = (parent.textContent || '').toLowerCase();
+                if (parentText.includes('delete class')) {
+                  return true;
+                }
+                parent = parent.parentElement;
+                depth++;
+              }
+            }
+          }
+          return false;
+        }).catch(() => false);
+        
+        if (deleteModalAppeared) {
+          logToFile(`❌ ERROR: Delete modal appeared after clicking class - we clicked the wrong element!`);
+          dlog(`❌ ERROR: Delete modal appeared after clicking class - we clicked the wrong element!`);
+          
+          // Try to dismiss the modal
+          const dismissed = await page.evaluate(() => {
+            const buttons = Array.from(document.querySelectorAll('button'));
+            for (const btn of buttons) {
+              if (btn.offsetParent === null) continue;
+              const text = (btn.textContent || '').trim().toLowerCase();
+              if (text === 'go back' || text.includes('back')) {
+                btn.click();
+                return true;
+              }
+            }
+            // Try Escape key
+            return false;
+          }).catch(() => false);
+          
+          if (dismissed) {
+            await sleep(1000);
+            dlog(`✓ Dismissed delete modal, will try clicking class again`);
+            // We'll need to retry clicking the class, but for now just log the error
+          } else {
+            await page.keyboard.press('Escape');
+            await sleep(1000);
+          }
+          
+          throw new Error(`Clicked wrong element - delete modal appeared instead of booking dialog`);
+        }
         
         // Verify the click worked by checking for common indicators:
         // - Booking dialog/modal appears
         // - Event becomes selected/highlighted
         // - A form or details panel appears
+        // - "Book Customer" button is visible
         const clickVerified = await page.evaluate(() => {
+          // Check for "Book Customer" button - this is the key indicator
+          const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+            if (btn.offsetParent === null) return false;
+            const text = (btn.textContent || '').toLowerCase();
+            return text.includes('book customer') || text.includes('book');
+          });
+          if (bookCustomerButton) {
+            return true;
+          }
+          
           // Check for booking dialog, modal, or details panel
           const bookingDialog = document.querySelector('div[class*="modal"], div[class*="dialog"], div[class*="booking"], div[class*="details"], div[class*="panel"]');
           if (bookingDialog && bookingDialog.offsetParent !== null) {
@@ -2384,7 +2516,7 @@ async function bookClass({
         }).catch(() => false);
         
         if (clickVerified) {
-          dlog(`✓ Click verified - booking dialog/details panel appeared`);
+          dlog(`✓ Click verified - booking dialog/details panel appeared with Book Customer button`);
         } else {
           dlog(`⚠ Click may not have registered - no booking dialog detected, but continuing...`);
         }
