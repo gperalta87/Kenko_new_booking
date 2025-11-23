@@ -1827,26 +1827,66 @@ async function bookClass({
       await takeScreenshot('before-clicking-day-option');
       
       // If dropdown still not ready, try keyboard navigation to select Day
+      let daySelectedViaKeyboard = false;
       if (!dropdownReady) {
-        dlog(`Dropdown not visible, trying keyboard navigation to select Day...`);
+        const keyboardNavMsg = `[DATE NAV DAY OPTION] Dropdown not visible (dropdownReady=${dropdownReady}), trying keyboard navigation to select Day...`;
+        logToFile(keyboardNavMsg);
+        dlog(keyboardNavMsg);
         try {
-          // Focus the dropdown first
-          const dropdownElement = await page.$('p-dropdown.ng-tns-c40-1, p-dropdown, #pr_id_2_label');
-          if (dropdownElement) {
-            await dropdownElement.focus();
-            await sleep(200);
+          // Focus the dropdown first - try multiple selectors
+          let dropdownElement = await page.$('p-dropdown.ng-tns-c40-1').catch(() => null);
+          if (!dropdownElement) {
+            dropdownElement = await page.$('p-dropdown').catch(() => null);
+          }
+          if (!dropdownElement) {
+            dropdownElement = await page.$('#pr_id_2_label').catch(() => null);
           }
           
-          // Try pressing ArrowDown then Enter to select first option (Day)
-          await page.keyboard.press('ArrowDown');
-          await sleep(300);
+          if (dropdownElement) {
+            dlog(`Found dropdown element, focusing...`);
+            await dropdownElement.focus();
+            await sleep(300);
+          } else {
+            dlog(`Could not find dropdown element, trying to focus by clicking label...`);
+            // Try clicking the label to focus
+            await page.click('#pr_id_2_label').catch(() => {});
+            await sleep(300);
+          }
+          
+          // Try pressing Space or ArrowDown to open dropdown, then ArrowDown to select Day, then Enter
+          dlog(`Pressing Space to open dropdown...`);
+          await page.keyboard.press('Space');
+          await sleep(500);
+          
+          // Check if dropdown opened
+          const dropdownOpened = await page.evaluate(() => {
+            const selectors = ['#pr_id_2_list', '[role="listbox"]', 'p-dropdownitem'];
+            for (const sel of selectors) {
+              const el = document.querySelector(sel);
+              if (el && el.offsetParent !== null) return true;
+            }
+            return false;
+          }).catch(() => false);
+          
+          if (dropdownOpened) {
+            dlog(`✓ Dropdown opened with Space key`);
+          } else {
+            dlog(`Dropdown didn't open with Space, trying ArrowDown...`);
+            await page.keyboard.press('ArrowDown');
+            await sleep(500);
+          }
+          
+          // Now select Day (first option) - press ArrowDown once to highlight Day, then Enter
+          dlog(`Selecting Day option with keyboard...`);
           await page.keyboard.press('Enter');
-          await sleep(800);
+          await sleep(1000);
           
           // Check if Day view was selected by checking the dropdown label
           const daySelected = await page.evaluate(() => {
-            const label = document.querySelector('#pr_id_2_label, span.p-dropdown-label');
-            return label && label.textContent?.trim() === 'Day';
+            const label = document.querySelector('#pr_id_2_label, span.p-dropdown-label, p-dropdown .p-dropdown-label');
+            const labelText = label ? label.textContent?.trim() : '';
+            dlog(`Label text after keyboard nav: "${labelText}"`);
+            return labelText === 'Day';
           }).catch(() => false);
           
           if (daySelected) {
@@ -1854,16 +1894,23 @@ async function bookClass({
             logToFile(keyboardMethodMsg);
             dlog(`✓ ${keyboardMethodMsg}`);
             await takeScreenshot('after-clicking-day-option');
+            daySelectedViaKeyboard = true;
             // Skip the rest of the day clicking logic - continue to next step
           } else {
-            dlog(`⚠ Keyboard navigation did not select Day, trying other methods...`);
+            const keyboardFailMsg = `[DATE NAV DAY OPTION] Keyboard navigation did not select Day, label text may be different`;
+            logToFile(keyboardFailMsg);
+            dlog(`⚠ ${keyboardFailMsg}`);
           }
         } catch (e) {
-          dlog(`Keyboard navigation failed: ${e?.message}`);
+          const keyboardErrorMsg = `[DATE NAV DAY OPTION] Keyboard navigation failed: ${e?.message}`;
+          logToFile(keyboardErrorMsg);
+          dlog(keyboardErrorMsg);
         }
       }
       
-      const dayClicked = await page.evaluate(() => {
+      // Only try clicking Day option if keyboard navigation didn't work
+      if (!daySelectedViaKeyboard) {
+        const dayClicked = await page.evaluate(() => {
         // Method 1: Try ID selector from Puppeteer recording
         const byId = document.querySelector('#pr_id_2_list p-dropdownitem:nth-of-type(1) span');
         if (byId && byId.offsetParent !== null) {
@@ -1915,18 +1962,18 @@ async function bookClass({
         return { success: false, reason: 'not_found' };
       }).catch((e) => ({ success: false, reason: e?.message || 'error' }));
       
-      if (dayClicked.success) {
-        const dayMethodMsg = `[DATE NAV DAY OPTION] Successfully clicked Day option using method: ${dayClicked.method}`;
-        logToFile(dayMethodMsg);
-        dlog(`✓ ${dayMethodMsg}`);
-        await sleep(1500);
-      } else {
-        const dayFailMsg = `[DATE NAV DAY OPTION] Could not click Day option: ${dayClicked.reason}, trying clickElement fallback...`;
-        logToFile(dayFailMsg);
-        dlog(`✗ ${dayFailMsg}`);
-        
-        // Final fallback: use clickElement
-      await clickElement(page, [
+        if (dayClicked.success) {
+          const dayMethodMsg = `[DATE NAV DAY OPTION] Successfully clicked Day option using method: ${dayClicked.method}`;
+          logToFile(dayMethodMsg);
+          dlog(`✓ ${dayMethodMsg}`);
+          await sleep(1500);
+        } else {
+          const dayFailMsg = `[DATE NAV DAY OPTION] Could not click Day option: ${dayClicked.reason}, trying clickElement fallback...`;
+          logToFile(dayFailMsg);
+          dlog(`✗ ${dayFailMsg}`);
+          
+          // Final fallback: use clickElement
+          await clickElement(page, [
           '#pr_id_2_list p-dropdownitem:nth-of-type(1) span',
           'p-dropdownitem:nth-of-type(1) span',
           'p-dropdownitem:first-child span',
@@ -1934,9 +1981,10 @@ async function bookClass({
           'li[aria-label="Day"]',
           '#p-highlighted-option',
           'p-dropdownitem span'
-        ], { offset: { x: 13, y: 4 }, debug: DEBUG });
-        await sleep(1500);
-      }
+          ], { offset: { x: 13, y: 4 }, debug: DEBUG });
+          await sleep(1500);
+        }
+      } // End of if (!daySelectedViaKeyboard)
       
       // Step 3: Click date button in the center (shows current date like "Nov 23, 2025")
       dlog(`Step 3: Clicking date button in center...`);
