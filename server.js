@@ -434,11 +434,21 @@ async function bookClass({
     delete process.env.DBUS_SESSION_BUS_ADDRESS;
     delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
     
+    // Add stealth arguments to bypass anti-scraping detection
+    // These are CRITICAL for bypassing Kenko's anti-scraping measures
+    const stealthArgs = [
+      '--disable-blink-features=AutomationControlled', // Most important - removes automation flag!
+      '--exclude-switches=enable-automation', // Remove automation flag from command line
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-site-isolation-trials',
+      '--disable-features=VizDisplayCompositor',
+    ];
+    
     browser = await puppeteer.launch({
       headless: headlessMode,
       executablePath: executablePath,
-      args: launchArgs,
-      defaultViewport: { width: 1440, height: 900 },
+      args: [...launchArgs, ...stealthArgs],
+      defaultViewport: { width: 1920, height: 1080 }, // Realistic viewport
       timeout: 120000,
       ignoreHTTPSErrors: true,
       // Additional options for better container compatibility
@@ -458,6 +468,106 @@ async function bookClass({
   }
 
   const page = await browser.newPage();
+  
+  // CRITICAL: Stealth mode - Make Puppeteer look like a real browser
+  // This bypasses anti-scraping detection that prevents autocomplete from working
+  dlog("Applying stealth techniques to bypass anti-scraping detection...");
+  
+  // 1. Set realistic User-Agent (Chrome on Windows)
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  );
+  
+  // 2. Override navigator.webdriver (most important - this is how sites detect automation)
+  await page.evaluateOnNewDocument(() => {
+    // Remove webdriver property
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => undefined,
+    });
+    
+    // Override Chrome runtime
+    window.chrome = {
+      runtime: {},
+    };
+    
+    // Add realistic plugins
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => [1, 2, 3, 4, 5], // Fake plugins array
+    });
+    
+    // Add realistic languages
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+    });
+    
+    // Override permissions
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) =>
+      parameters.name === 'notifications'
+        ? Promise.resolve({ state: Notification.permission })
+        : originalQuery(parameters);
+    
+    // Override getBattery (if it exists)
+    if (navigator.getBattery) {
+      navigator.getBattery = () => Promise.resolve({
+        charging: true,
+        chargingTime: 0,
+        dischargingTime: Infinity,
+        level: 1,
+      });
+    }
+    
+    // Add realistic connection
+    Object.defineProperty(navigator, 'connection', {
+      get: () => ({
+        effectiveType: '4g',
+        rtt: 50,
+        downlink: 10,
+        saveData: false,
+      }),
+    });
+    
+    // Override toString to hide automation
+    const originalToString = Function.prototype.toString;
+    Function.prototype.toString = function() {
+      if (this === navigator.webdriver) {
+        return 'undefined';
+      }
+      return originalToString.call(this);
+    };
+  });
+  
+  // 3. Set realistic viewport and screen properties
+  await page.setViewport({
+    width: 1920,
+    height: 1080,
+    deviceScaleFactor: 1,
+  });
+  
+  // 4. Set extra headers to look like a real browser
+  await page.setExtraHTTPHeaders({
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-User': '?1',
+    'Sec-Fetch-Dest': 'document',
+  });
+  
+  // 5. Override permissions (for both domains)
+  const context = browser.defaultBrowserContext();
+  await context.overridePermissions('https://partners.gokenko.com', [
+    'geolocation',
+    'notifications',
+  ]);
+  await context.overridePermissions('https://kenko.app', [
+    'geolocation',
+    'notifications',
+  ]);
+  
+  dlog("✓ Stealth techniques applied successfully");
   
   // Small delay to ensure page is stable
   await sleep(500);
