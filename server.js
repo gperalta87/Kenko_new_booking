@@ -2943,12 +2943,138 @@ async function bookClass({
       // Take screenshot before selecting customer
       await takeScreenshot('before-customer-selection');
       
-      await clickElement(page, [
-        'div.search-container > div > div',
-        '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div)',
-        ':scope >>> div.search-container > div > div',
-        `::-p-text(${CUSTOMER_NAME})`
-      ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
+      // First, verify autocomplete dropdown is visible
+      const dropdownCheck = await page.evaluate(() => {
+        // Look for customer options in dropdown
+        const allDivs = Array.from(document.querySelectorAll('div'));
+        const customerOptions = [];
+        
+        for (const div of allDivs) {
+          if (div.offsetParent === null) continue;
+          const text = (div.textContent || '').toLowerCase();
+          if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
+            const rect = div.getBoundingClientRect();
+            customerOptions.push({
+              text: div.textContent,
+              x: rect.left + rect.width / 2,
+              y: rect.top + rect.height / 2,
+              visible: true
+            });
+          }
+        }
+        
+        return {
+          found: customerOptions.length > 0,
+          count: customerOptions.length,
+          options: customerOptions
+        };
+      }).catch(() => ({ found: false, count: 0, options: [] }));
+      
+      if (!dropdownCheck.found) {
+        logToFile(`❌ ERROR: Customer dropdown options not found! Cannot select customer.`);
+        dlog(`❌ ERROR: Customer dropdown options not found! Cannot select customer.`);
+        throw new Error(`Customer dropdown not visible - cannot select customer. Autocomplete may not have appeared.`);
+      }
+      
+      dlog(`✓ Found ${dropdownCheck.count} customer option(s) in dropdown`);
+      logToFile(`[CUSTOMER SELECTION] Found ${dropdownCheck.count} customer option(s) in dropdown`);
+      
+      // Try multiple methods to click the customer
+      let customerSelected = false;
+      
+      // Method 1: Try using clickElement with text selector
+      try {
+        dlog(`[CUSTOMER SELECTION] Method 1: Trying text-based selector...`);
+        await clickElement(page, [
+          `::-p-text(${CUSTOMER_NAME})`,
+          `::-p-text(Fitpass)`,
+          'div.search-container > div > div',
+          '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div)',
+          ':scope >>> div.search-container > div > div'
+        ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
+        customerSelected = true;
+        dlog(`✓ Customer selected using Method 1`);
+      } catch (e) {
+        dlog(`Method 1 failed: ${e?.message}`);
+      }
+      
+      // Method 2: Try clicking by coordinates if we found options
+      if (!customerSelected && dropdownCheck.options.length > 0) {
+        try {
+          dlog(`[CUSTOMER SELECTION] Method 2: Trying coordinate-based click...`);
+          const firstOption = dropdownCheck.options[0];
+          await page.mouse.click(firstOption.x, firstOption.y);
+          logClick('Select customer', `mouse.click(${firstOption.x}, ${firstOption.y})`, 'Puppeteer.mouse.click()');
+          customerSelected = true;
+          dlog(`✓ Customer selected using Method 2 (coordinates)`);
+        } catch (e) {
+          dlog(`Method 2 failed: ${e?.message}`);
+        }
+      }
+      
+      // Method 3: Try direct element click via page.evaluate
+      if (!customerSelected) {
+        try {
+          dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click...`);
+          const clicked = await page.evaluate((customerName) => {
+            const allDivs = Array.from(document.querySelectorAll('div'));
+            for (const div of allDivs) {
+              if (div.offsetParent === null) continue;
+              const text = (div.textContent || '').toLowerCase();
+              if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
+                div.click();
+                return true;
+              }
+            }
+            return false;
+          }, CUSTOMER_NAME).catch(() => false);
+          
+          if (clicked) {
+            customerSelected = true;
+            logClick('Select customer', 'page.evaluate(element.click())', 'Direct element click');
+            dlog(`✓ Customer selected using Method 3 (direct click)`);
+          }
+        } catch (e) {
+          dlog(`Method 3 failed: ${e?.message}`);
+        }
+      }
+      
+      if (!customerSelected) {
+        logToFile(`❌ ERROR: Failed to select customer using all methods!`);
+        throw new Error(`Failed to select customer - all click methods failed`);
+      }
+      
+      // Wait a bit for selection to register
+      await sleep(1000);
+      
+      // Verify customer was selected
+      const customerSelectedCheck = await page.evaluate(() => {
+        // Check if customer name appears in the input or selected area
+        const inputs = Array.from(document.querySelectorAll('input'));
+        for (const input of inputs) {
+          if (input.offsetParent === null) continue;
+          const value = (input.value || '').toLowerCase();
+          if (value.includes('fitpass')) {
+            return true;
+          }
+        }
+        
+        // Check if "BOOK USING CREDITS" button appeared (indicates customer selected)
+        const bookButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+          if (btn.offsetParent === null) return false;
+          const text = (btn.textContent || '').toLowerCase();
+          return text.includes('book using credits') || text.includes('book using');
+        });
+        
+        return bookButton !== undefined;
+      }).catch(() => false);
+      
+      if (!customerSelectedCheck) {
+        logToFile(`⚠ WARNING: Customer selection may not have registered - BOOK USING CREDITS button not found`);
+        dlog(`⚠ WARNING: Customer selection may not have registered`);
+      } else {
+        dlog(`✓ Customer selection verified - BOOK USING CREDITS button is visible`);
+      }
       
       // Take screenshot immediately after selecting customer to see if booking was triggered
       await takeScreenshot('after-customer-selection');
@@ -3020,6 +3146,9 @@ async function bookClass({
       }
     });
     
+
+    // Track whether we actually completed the charge step (required for successful booking)
+    let chargeStepCompleted = false;
 
     // Step 13: Click "BOOK USING CREDITS" button - this is the confirmation button
     // Note: Based on the modal UI, this button appears directly after selecting customer
@@ -3170,271 +3299,89 @@ async function bookClass({
         };
       }).catch(() => ({ hasSuccess: false, modalOpen: true }));
       
-      if (bookingState.hasSuccess || !bookingState.modalOpen) {
-        dlog(`✓ Booking appears to be successful! Closing browser immediately...`);
-        // Close browser immediately after successful booking
-        await page.close().catch(() => {});
-        await browser.close().catch(() => {});
-        return { bookingComplete: true, hasSuccess: true };
-      }
-      
-      // Return the booking state so we can conditionally skip Charge step
+      // DO NOT mark as successful here - we MUST complete the charge step
+      // Just return the booking state to continue to charge step
+      dlog(`✓ BOOK USING CREDITS clicked, proceeding to Charge step...`);
       return bookingState;
     });
 
-    // Step 15: Click Charge button (only if booking hasn't completed yet)
-    // When using credits, the booking might complete immediately without needing to charge
+    // Step 15: Click Charge button - REQUIRED for booking to be successful
     await step("Click Charge", async () => {
-      dlog(`Checking if Charge button is needed...`);
+      dlog(`Looking for Charge button (REQUIRED for booking completion)...`);
       
-      // Check if booking is already complete (page might have been closed after successful booking)
-      let finalCheck;
-      try {
-        // Wait a bit more to see if booking completed or if Charge button appears
-        await sleep(3000);
+      // Wait for Charge button to appear
+      await sleep(3000);
+      
+      // Check if Charge button is visible
+      const chargeButtonCheck = await page.evaluate(() => {
+        // Look for Charge button
+        const chargeButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+          if (btn.offsetParent === null) return false;
+          const text = (btn.textContent || '').toLowerCase();
+          const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+          return text.includes('charge') || ariaLabel.includes('charge');
+        });
         
-        // Check if booking is already complete
-        finalCheck = await page.evaluate(() => {
-        // Look for success messages
+        return {
+          found: chargeButton !== undefined,
+          visible: chargeButton !== undefined && chargeButton.offsetParent !== null,
+          text: chargeButton ? chargeButton.textContent : null
+        };
+      }).catch(() => ({ found: false, visible: false, text: null }));
+      
+      if (!chargeButtonCheck.visible) {
+        logToFile(`❌ ERROR: Charge button not found or not visible - booking cannot be completed!`);
+        dlog(`❌ ERROR: Charge button not found or not visible - booking cannot be completed!`);
+        throw new Error(`Charge button not found - booking cannot be finalized without completing charge step`);
+      }
+      
+      dlog(`✓ Charge button found: "${chargeButtonCheck.text}"`);
+      
+      // Click the Charge button
+      dlog(`Clicking Charge button...`);
+      await clickElement(page, [
+        '::-p-aria(Charge MX$ 0)',
+        'div.final-price-calculation-section > button',
+        '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/app-floating-pos/div/div[2]/div[2]/div[2]/button)',
+        ':scope >>> div.final-price-calculation-section > button',
+        '::-p-text(Charge  MX$ 0)',
+        'button:has-text("Charge")'
+      ], { offset: { x: 108, y: 19.5 }, location: 'Charge button', debug: DEBUG });
+      
+      dlog(`✓ Charge button clicked, waiting for booking confirmation...`);
+      await sleep(2000); // Wait for booking to be processed
+      
+      // Verify booking was completed successfully
+      const bookingConfirmed = await page.evaluate(() => {
         const bodyText = document.body.textContent || '';
         const hasSuccess = bodyText.toLowerCase().includes('success') ||
                            bodyText.toLowerCase().includes('booked') ||
-                           bodyText.toLowerCase().includes('confirmed') ||
-                           bodyText.toLowerCase().includes('complete');
+                           bodyText.toLowerCase().includes('confirmed');
         
-        // Check if modal closed
-        const modal = document.querySelector('[class*="modal"], [class*="dialog"], [class*="overlay"]');
-        const modalOpen = modal && modal.offsetParent !== null;
+        // Check for success notifications
+        const notifications = Array.from(document.querySelectorAll('[class*="notification"], [class*="toast"], [class*="alert"], [class*="success"]'));
+        const hasSuccessNotification = notifications.some(n => {
+          if (n.offsetParent === null) return false;
+          const text = (n.textContent || '').toLowerCase();
+          return text.includes('success') || text.includes('booked') || text.includes('confirmed');
+        });
         
-        // Look for Charge button
-        const chargeButton = Array.from(document.querySelectorAll('button')).find(btn => 
-          (btn.textContent?.includes('Charge') || btn.getAttribute('aria-label')?.includes('Charge')) &&
-          btn.offsetParent !== null
-        );
-        
-        return {
-          hasSuccess,
-          modalOpen,
-          hasChargeButton: chargeButton !== undefined,
-          chargeButtonVisible: chargeButton !== undefined && chargeButton.offsetParent !== null
-        };
-      }).catch((e) => {
-        // If page is closed/detached, booking was likely successful
-        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
-          dlog(`✓ Page closed/detached - booking was successful, skipping Charge step`);
-          return { hasSuccess: true, modalOpen: false, hasChargeButton: false, chargeButtonVisible: false };
-        }
-        return { hasSuccess: false, modalOpen: true, hasChargeButton: false, chargeButtonVisible: false };
-      });
+        return { hasSuccess, hasSuccessNotification };
+      }).catch(() => ({ hasSuccess: false, hasSuccessNotification: false }));
       
-      if (!finalCheck) {
-        dlog(`✓ Could not check page status - assuming booking was successful, skipping Charge step`);
-        return;
+      if (bookingConfirmed.hasSuccess || bookingConfirmed.hasSuccessNotification) {
+        chargeStepCompleted = true;
+        dlog(`✓ Booking confirmed after Charge step!`);
+        logToFile(`✓ Charge step completed successfully - booking is finalized`);
+      } else {
+        logToFile(`⚠ WARNING: Charge button clicked but no success confirmation found`);
+        dlog(`⚠ WARNING: Charge button clicked but no success confirmation found`);
+        // Still mark as completed if we clicked it (might be processing)
+        chargeStepCompleted = true;
       }
       
-      if (finalCheck.hasSuccess || !finalCheck.modalOpen) {
-        dlog(`✓ Booking appears to be complete - skipping Charge step`);
-        dlog(`  Success: ${finalCheck.hasSuccess}, Modal open: ${finalCheck.modalOpen}`);
-        return; // Skip Charge step - booking is complete
-      }
-      
-      if (!finalCheck.chargeButtonVisible) {
-        dlog(`⚠ Charge button not found or not visible - booking may already be complete`);
-        dlog(`  Checking for alternative completion indicators...`);
-        
-        // Wait a bit more and check again
-        try {
-          await sleep(2000);
-          const finalCheck2 = await page.evaluate(() => {
-            const bodyText = document.body.textContent || '';
-            return bodyText.toLowerCase().includes('success') ||
-                   bodyText.toLowerCase().includes('booked') ||
-                   bodyText.toLowerCase().includes('confirmed');
-          }).catch(() => false);
-          
-          if (finalCheck2) {
-            dlog(`✓ Booking confirmed - skipping Charge step`);
-            return;
-          }
-        } catch (e) {
-          if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
-            dlog(`✓ Page closed/detached - booking was successful, skipping Charge step`);
-            return;
-          }
-        }
-      }
-      } catch (e) {
-        // Handle errors from initial check (page might be closed)
-        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
-          dlog(`✓ Page closed/detached during initial check - booking was successful, skipping Charge step`);
-          return;
-        }
-        // If it's a different error and we don't have finalCheck, we can't proceed
-        if (!finalCheck) {
-          dlog(`⚠ Error during initial check: ${e?.message} - skipping Charge step`);
-          return;
-        }
-      }
-      
-      try {
-        dlog(`Charge button needed - attempting to click...`);
-        await clickElement(page, [
-          '::-p-aria(Charge MX$ 0)',
-          'div.final-price-calculation-section > button',
-          '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/app-floating-pos/div/div[2]/div[2]/div[2]/button)',
-          ':scope >>> div.final-price-calculation-section > button',
-          '::-p-text(Charge  MX$ 0)'
-        ], { offset: { x: 108, y: 19.5 } });
-        
-        dlog(`Charge button clicked, waiting for booking to be processed...`);
-        await sleep(500); // Optimized: reduced wait time
-        
-        // Check immediately if booking is confirmed
-        const immediateCheck = await page.evaluate(() => {
-          const bodyText = document.body.textContent || '';
-          const hasSuccess = bodyText.toLowerCase().includes('success') ||
-                             bodyText.toLowerCase().includes('booked') ||
-                             bodyText.toLowerCase().includes('confirmed');
-          const modal = document.querySelector('[class*="modal"], [class*="dialog"], [class*="overlay"]');
-          const modalOpen = modal && modal.offsetParent !== null;
-          return { hasSuccess, modalOpen };
-        }).catch(() => ({ hasSuccess: false, modalOpen: true }));
-        
-        if (immediateCheck.hasSuccess || !immediateCheck.modalOpen) {
-          dlog(`✓ Booking confirmed immediately after Charge! Closing browser...`);
-          await page.close().catch(() => {});
-          await browser.close().catch(() => {});
-          return; // Exit early - booking complete
-        }
-      } catch (e) {
-        // Handle detached frame error gracefully
-        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
-          dlog(`✓ Page closed/detached during Charge step - booking was successful`);
-          return;
-        }
-        throw e; // Re-throw other errors
-      }
-      
-      // Wait for booking confirmation/success indicators (optimized: reduced attempts)
-      // Only check if page is still available
-      try {
-        dlog(`Checking for booking confirmation...`);
-        
-        let bookingConfirmed = false;
-        let confirmationMessage = null;
-        let bookingId = null;
-        
-        // Wait up to 5 seconds for confirmation (optimized: reduced from 15 seconds)
-        for (let attempt = 0; attempt < 5; attempt++) {
-          await sleep(1000);
-          
-          const status = await page.evaluate(() => {
-          // Check for success messages
-          const successMessages = document.querySelectorAll(
-            'div[class*="success"], ' +
-            'div[class*="confirmation"], ' +
-            'div[class*="completed"], ' +
-            '[class*="alert-success"], ' +
-            '[class*="message-success"]'
-          );
-          
-          let message = null;
-          for (const msg of successMessages) {
-            if (msg.offsetParent !== null) {
-              const text = msg.textContent || '';
-              if (text.toLowerCase().includes('success') || 
-                  text.toLowerCase().includes('booked') ||
-                  text.toLowerCase().includes('confirmed') ||
-                  text.toLowerCase().includes('complete')) {
-                message = text.substring(0, 200);
-                break;
-              }
-            }
-          }
-          
-          // Check if Charge button is disabled/gone (indicates processing)
-          const chargeButton = document.querySelector('button:has-text("Charge"), [aria-label*="Charge"]');
-          const buttonGone = chargeButton === null || chargeButton.offsetParent === null;
-          
-          // Check for booking ID or reference number
-          const pageText = document.body.textContent || '';
-          const bookingIdMatch = pageText.match(/booking[:\s#]*(\d+)/i) || 
-                                 pageText.match(/reference[:\s#]*(\d+)/i) ||
-                                 pageText.match(/confirmation[:\s#]*(\d+)/i);
-          
-          return {
-            message: message,
-            buttonGone: buttonGone,
-            bookingId: bookingIdMatch ? bookingIdMatch[1] : null,
-            hasSuccess: message !== null
-          };
-        }).catch(() => ({ message: null, buttonGone: false, bookingId: null, hasSuccess: false }));
-        
-        if (status.hasSuccess) {
-          bookingConfirmed = true;
-          confirmationMessage = status.message;
-          bookingId = status.bookingId;
-          dlog(`✓ Booking confirmed! Closing browser immediately...`);
-          dlog(`  Confirmation message: ${confirmationMessage || 'Found in page'}`);
-          if (bookingId) {
-            dlog(`  Booking ID: ${bookingId}`);
-          }
-          // Close browser immediately after confirmation
-          await page.close().catch(() => {});
-          await browser.close().catch(() => {});
-          break;
-        }
-        
-        if (status.buttonGone && attempt > 1) {
-          dlog(`Charge button disappeared (attempt ${attempt + 1}/5), booking may be processing...`);
-        }
-        
-        dlog(`Waiting for confirmation... (attempt ${attempt + 1}/5)`);
-      }
-      
-      if (!bookingConfirmed) {
-        dlog(`⚠ No explicit confirmation message found after 5 seconds, but booking may still be successful. Closing browser...`);
-        // Close browser even if no explicit confirmation (booking likely completed)
-        await page.close().catch(() => {});
-        await browser.close().catch(() => {});
-        dlog(`Checking page state...`);
-        
-        // Final check - take a screenshot and log page state
-        // Note: Page may already be closed, so this will be caught by outer try-catch
-        const finalState = await page.evaluate(() => {
-          return {
-            url: window.location.href,
-            title: document.title,
-            hasError: document.body.textContent?.toLowerCase().includes('error') || false,
-            hasSuccess: document.body.textContent?.toLowerCase().includes('success') || false,
-            hasBooking: document.body.textContent?.toLowerCase().includes('booked') || false,
-            pageText: document.body.textContent?.substring(0, 500) || ''
-          };
-        }).catch(() => ({
-          url: 'unknown',
-          title: 'unknown',
-          hasError: false,
-          hasSuccess: true, // Assume success if page is closed
-          hasBooking: true,
-          pageText: ''
-        }));
-        
-        dlog(`  Page URL: ${finalState.url || 'unknown'}`);
-        dlog(`  Page title: ${finalState.title || 'unknown'}`);
-        dlog(`  Has error: ${finalState.hasError || false}`);
-        dlog(`  Has success: ${finalState.hasSuccess || false}`);
-        dlog(`  Has booking: ${finalState.hasBooking || false}`);
-        
-        // Note: Screenshot skipped since page is already closed
-      }
-      } catch (e) {
-        // Handle detached frame error gracefully
-        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
-          dlog(`✓ Page closed/detached during confirmation check - booking was successful`);
-        } else {
-          dlog(`⚠ Error during confirmation check: ${e?.message}`);
-        }
-      }
+      // Take screenshot after charge step
+      await takeScreenshot('after-charge-step');
       
       await sleep(2000);
     });
@@ -3647,11 +3594,24 @@ async function bookClass({
       });
     }
     
+    // Only mark as successful if charge step was completed
+    if (!chargeStepCompleted) {
+      logToFile(`❌ ERROR: Booking failed - Charge step was not completed`);
+      return {
+        ok: false,
+        error: `Booking failed - Charge step was not completed. Booking cannot be finalized without completing the charge step.`,
+        clickCount: clickCounter,
+        clickLog: clickLog.slice(-20),
+        ...(screenshots.length > 0 ? { screenshots } : {})
+      };
+    }
+    
     return {
       ok: true,
       message: `Successfully booked class for ${CUSTOMER_NAME} on ${targetDate} at ${targetTime}`,
       verified: bookingVerified,
       foundInReservations: bookingFoundInReservations,
+      chargeStepCompleted: chargeStepCompleted,
       clickCount: clickCounter,
       clickLog: clickLog.slice(-20), // Include last 20 clicks in response
       ...(reservationDetails ? { reservationDetails } : {}),
