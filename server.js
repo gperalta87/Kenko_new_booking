@@ -45,7 +45,7 @@ const logToFile = (message) => {
 
 // Constants
 const TIMEOUT = 10000;
-const CUSTOMER_NAME = "Fitpass One"; // Fixed for now, will be parameterized later
+const CUSTOMER_NAME = "Fitpass"; // Fixed for now, will be parameterized later
 const PLAN_SELECTOR = "div:nth-of-type(32)"; // Fitpass Check-in plan
 
 // Utilities
@@ -2389,7 +2389,7 @@ async function bookClass({
         '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/input)',
         ':scope >>> div.customer-overlay input'
       ], CUSTOMER_NAME.toLowerCase(), { debug: DEBUG });
-      await sleep(500); // Optimized: reduced from 1000ms
+      await sleep(2000); // Wait for autocomplete dropdown to appear
     });
 
     // Step 10: Select customer from results
