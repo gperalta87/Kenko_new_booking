@@ -651,30 +651,113 @@ async function bookClass({
             input.focus();
             input.dispatchEvent(new Event('focus', { bubbles: true }));
             input.dispatchEvent(new Event('click', { bubbles: true }));
+            input.dispatchEvent(new Event('mousedown', { bubbles: true }));
+            input.dispatchEvent(new Event('mouseup', { bubbles: true }));
           }
         }, foundSelector);
-        await sleep(200);
+        await sleep(300);
         
-        // Type each character slowly using ONLY keyboard.type() - this triggers autocomplete naturally
+        // CRITICAL: Type each character with FULL event sequence (keydown -> keypress -> input -> keyup)
+        // This simulates REAL human typing - Railway needs this level of realism to trigger autocomplete
+        dlog(`Typing "${gymNameLower}" with full event sequence (Railway-optimized, ultra-realistic)...`);
+        
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
+          const charCode = char.charCodeAt(0);
           
-          // Type the character with realistic delay - Railway needs slower typing
-          await page.keyboard.type(char, { delay: 250 }); // Increased delay for Railway
+          // Generate random delay between characters (humans don't type at constant speed)
+          // Base delay: 300-500ms, with occasional longer pauses
+          const baseDelay = 300 + Math.random() * 200;
+          const occasionalPause = Math.random() < 0.2 ? 400 : 0; // 20% chance of longer pause
+          const delay = baseDelay + occasionalPause;
           
-          // Wait between characters to allow autocomplete to process
-          await sleep(600); // Increased wait for Railway - autocomplete needs time to fetch results
+          dlog(`Typing character ${i+1}/${gymNameLower.length}: "${char}" (delay: ${Math.round(delay)}ms)`);
+          
+          // FULL EVENT SEQUENCE for each character (like a real human):
+          // 1. KeyDown event
+          await page.evaluate((selector, char, charCode) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              const keyDownEvent = new KeyboardEvent('keydown', {
+                key: char,
+                code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+                keyCode: charCode,
+                which: charCode,
+                bubbles: true,
+                cancelable: true
+              });
+              input.dispatchEvent(keyDownEvent);
+            }
+          }, foundSelector, char, charCode);
+          await sleep(50 + Math.random() * 50); // Small random delay
+          
+          // 2. KeyPress event
+          await page.evaluate((selector, char, charCode) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              const keyPressEvent = new KeyboardEvent('keypress', {
+                key: char,
+                code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+                keyCode: charCode,
+                which: charCode,
+                bubbles: true,
+                cancelable: true
+              });
+              input.dispatchEvent(keyPressEvent);
+            }
+          }, foundSelector, char, charCode);
+          await sleep(30 + Math.random() * 30);
+          
+          // 3. Actually type the character using keyboard (this sets the value)
+          await page.keyboard.type(char, { delay: 0 }); // No delay here, we control timing manually
+          
+          // 4. Input event (fires when value changes)
+          await page.evaluate((selector) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+              Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+              input.dispatchEvent(inputEvent);
+            }
+          }, foundSelector);
+          await sleep(50 + Math.random() * 50);
+          
+          // 5. KeyUp event
+          await page.evaluate((selector, char, charCode) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              const keyUpEvent = new KeyboardEvent('keyup', {
+                key: char,
+                code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+                keyCode: charCode,
+                which: charCode,
+                bubbles: true,
+                cancelable: true
+              });
+              input.dispatchEvent(keyUpEvent);
+            }
+          }, foundSelector, char, charCode);
+          
+          // Wait between characters - Railway needs time for autocomplete to process
+          // Longer wait after first few characters (when autocomplete typically starts)
+          const waitTime = i < 3 ? 800 + Math.random() * 400 : 600 + Math.random() * 300;
+          await sleep(waitTime);
         }
         
-        // After typing, trigger input event one more time to ensure autocomplete fires
+        // Final input event to ensure autocomplete fires one more time
         await page.evaluate((selector) => {
           const input = document.querySelector(selector);
           if (input) {
-            input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-            input.dispatchEvent(new Event('keyup', { bubbles: true, cancelable: true }));
+            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+            Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+            input.dispatchEvent(inputEvent);
+            
+            // Also trigger compositionend (for autocomplete systems that listen to it)
+            const compositionEndEvent = new CompositionEvent('compositionend', { bubbles: true });
+            input.dispatchEvent(compositionEndEvent);
           }
         }, foundSelector);
-        await sleep(500);
+        await sleep(800);
         
         dlog("✓ Finished typing with keyboard.type() only");
         
@@ -704,8 +787,8 @@ async function bookClass({
         await inputElement.focus();
         await sleep(200);
         
-        // CRITICAL: Type character by character using ONLY keyboard.type() to trigger autocomplete
-        dlog(`Typing "${gymNameLower}" character by character (Railway-optimized, keyboard only, fallback)...`);
+        // CRITICAL: Type character by character with FULL event sequence (same as main method)
+        dlog(`Typing "${gymNameLower}" with full event sequence (Railway-optimized, ultra-realistic, fallback)...`);
         
         // Ensure input is focused and ready - click first to ensure it's active
         await inputElement.click();
@@ -721,31 +804,109 @@ async function bookClass({
             input.focus();
             input.dispatchEvent(new Event('focus', { bubbles: true }));
             input.dispatchEvent(new Event('click', { bubbles: true }));
+            input.dispatchEvent(new Event('mousedown', { bubbles: true }));
+            input.dispatchEvent(new Event('mouseup', { bubbles: true }));
           }
         });
-        await sleep(200);
+        await sleep(300);
         
-        // Type each character slowly using ONLY keyboard.type() - this triggers autocomplete naturally
+        // Type each character with FULL event sequence (keydown -> keypress -> input -> keyup)
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
+          const charCode = char.charCodeAt(0);
           
-          // Type the character with realistic delay - Railway needs slower typing
-          await page.keyboard.type(char, { delay: 250 }); // Increased delay for Railway
+          // Generate random delay between characters
+          const baseDelay = 300 + Math.random() * 200;
+          const occasionalPause = Math.random() < 0.2 ? 400 : 0;
+          const delay = baseDelay + occasionalPause;
           
-          // Wait between characters to allow autocomplete to process
-          await sleep(600); // Increased wait for Railway - autocomplete needs time to fetch results
+          dlog(`[FALLBACK] Typing character ${i+1}/${gymNameLower.length}: "${char}" (delay: ${Math.round(delay)}ms)`);
+          
+          // FULL EVENT SEQUENCE for each character
+          await page.evaluate((char, charCode) => {
+            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+            const input = inputs.find(i => i.offsetParent !== null);
+            if (input) {
+              const keyDownEvent = new KeyboardEvent('keydown', {
+                key: char,
+                code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+                keyCode: charCode,
+                which: charCode,
+                bubbles: true,
+                cancelable: true
+              });
+              input.dispatchEvent(keyDownEvent);
+            }
+          }, char, charCode);
+          await sleep(50 + Math.random() * 50);
+          
+          await page.evaluate((char, charCode) => {
+            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+            const input = inputs.find(i => i.offsetParent !== null);
+            if (input) {
+              const keyPressEvent = new KeyboardEvent('keypress', {
+                key: char,
+                code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+                keyCode: charCode,
+                which: charCode,
+                bubbles: true,
+                cancelable: true
+              });
+              input.dispatchEvent(keyPressEvent);
+            }
+          }, char, charCode);
+          await sleep(30 + Math.random() * 30);
+          
+          // Actually type the character
+          await page.keyboard.type(char, { delay: 0 });
+          
+          // Input event
+          await page.evaluate(() => {
+            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+            const input = inputs.find(i => i.offsetParent !== null);
+            if (input) {
+              const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+              Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+              input.dispatchEvent(inputEvent);
+            }
+          });
+          await sleep(50 + Math.random() * 50);
+          
+          // KeyUp event
+          await page.evaluate((char, charCode) => {
+            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+            const input = inputs.find(i => i.offsetParent !== null);
+            if (input) {
+              const keyUpEvent = new KeyboardEvent('keyup', {
+                key: char,
+                code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+                keyCode: charCode,
+                which: charCode,
+                bubbles: true,
+                cancelable: true
+              });
+              input.dispatchEvent(keyUpEvent);
+            }
+          }, char, charCode);
+          
+          // Wait between characters
+          const waitTime = i < 3 ? 800 + Math.random() * 400 : 600 + Math.random() * 300;
+          await sleep(waitTime);
         }
         
-        // After typing, trigger input event one more time to ensure autocomplete fires
+        // Final input event
         await page.evaluate(() => {
           const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
           const input = inputs.find(i => i.offsetParent !== null);
           if (input) {
-            input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-            input.dispatchEvent(new Event('keyup', { bubbles: true, cancelable: true }));
+            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+            Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+            input.dispatchEvent(inputEvent);
+            const compositionEndEvent = new CompositionEvent('compositionend', { bubbles: true });
+            input.dispatchEvent(compositionEndEvent);
           }
         });
-        await sleep(500);
+        await sleep(800);
         
         dlog("✓ Finished typing with keyboard.type() only (fallback)");
         
