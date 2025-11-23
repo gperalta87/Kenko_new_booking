@@ -2286,8 +2286,10 @@ async function bookClass({
   }
 }
 
-// Health check endpoint
-app.get("/", (_req, res) => res.send("✅ Booking scraper API online"));
+// Health check endpoint - must respond quickly for Railway healthcheck
+app.get("/", (_req, res) => {
+  res.status(200).send("✅ Booking scraper API online");
+});
 
 // Booking endpoint
 app.post("/book", async (req, res) => {
