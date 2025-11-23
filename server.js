@@ -2426,7 +2426,8 @@ async function bookClass({
         ':scope >>> div.booking-btn > button',
         '::-p-text(Book Customer)'
       ], { offset: { x: 61, y: 8.3828125 } });
-      await sleep(500); // Optimized: reduced from 1000ms
+      await sleep(1500); // Wait for modal/dialog to open
+      await takeScreenshot('after-book-customer-click');
     });
 
     // Step 8: Search for customer
@@ -2434,15 +2435,51 @@ async function bookClass({
       const customerSearchValue = CUSTOMER_NAME.toLowerCase();
       dlog(`Typing customer name character by character: ${customerSearchValue}`);
       
-      // Find the customer search input field
+      // Take screenshot before searching for input field
+      await takeScreenshot('before-customer-search-input-find');
+      
+      // Wait for the customer search modal/dialog to appear after clicking "Book Customer"
+      dlog(`Waiting for customer search input field to appear...`);
+      await sleep(1000); // Initial wait for modal to open
+      
+      // Try to wait for the input field to appear with a timeout
       const customerInputSelectors = [
         '::-p-aria(Search customer)',
         'div.customer-overlay input',
         '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/input)',
         ':scope >>> div.customer-overlay input',
         'input[placeholder*="customer" i]',
-        'input[type="text"]'
+        'input[placeholder*="Search" i]',
+        'input[type="text"]',
+        'input[type="search"]'
       ];
+      
+      // Wait for at least one selector to appear
+      let inputFound = false;
+      for (let attempt = 0; attempt < 10; attempt++) {
+        for (const selector of customerInputSelectors) {
+          try {
+            const element = await page.$(selector).catch(() => null);
+            if (element) {
+              const isVisible = await element.isVisible().catch(() => false);
+              if (isVisible) {
+                inputFound = true;
+                dlog(`✓ Customer search input found on attempt ${attempt + 1} with selector: ${selector}`);
+                break;
+              }
+            }
+          } catch (e) {
+            continue;
+          }
+        }
+        if (inputFound) break;
+        await sleep(500); // Wait 500ms between attempts
+      }
+      
+      if (!inputFound) {
+        logToFile(`⚠ Customer search input not found after waiting, trying to find it anyway...`);
+        dlog(`⚠ Customer search input not found after waiting, trying to find it anyway...`);
+      }
       
       let foundInputElement = null;
       let foundInputSelector = null;
