@@ -622,14 +622,28 @@ async function bookClass({
   try {
     // Step 1: Navigate to login page
     await step("Navigate to login", async () => {
-      await page.setViewport({ width: 947, height: 861 });
+      await page.setViewport({ width: 1920, height: 1080 }); // Use realistic viewport
       dlog("Navigating to login page");
       await page.goto("https://partners.gokenko.com/login", { 
         waitUntil: "domcontentloaded",
         timeout: 30000 
       });
       dlog("Page loaded");
-      await sleep(500); // Minimal wait for page to render
+      
+      // Verify stealth is working - check if webdriver is hidden
+      const webdriverCheck = await page.evaluate(() => {
+        return {
+          webdriver: navigator.webdriver,
+          userAgent: navigator.userAgent,
+          plugins: navigator.plugins.length,
+          languages: navigator.languages,
+          chrome: !!window.chrome
+        };
+      });
+      dlog(`Stealth check: webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
+      logToFile(`[STEALTH] webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
+      
+      await sleep(1000); // Wait for page to fully render and scripts to load
     });
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
