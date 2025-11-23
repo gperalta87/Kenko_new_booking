@@ -5,8 +5,13 @@ console.log("🚀 Starting server initialization...");
 import express from "express";
 console.log("✅ Express imported");
 
-import puppeteer from "puppeteer";
-console.log("✅ Puppeteer imported");
+import puppeteer from "puppeteer-extra";
+import StealthPlugin from "puppeteer-extra-plugin-stealth";
+
+// Use stealth plugin to bypass anti-scraping detection
+// This plugin handles navigator.webdriver, chrome runtime, plugins, and many other detection vectors
+puppeteer.use(StealthPlugin());
+console.log("✅ Puppeteer-extra with stealth plugin imported");
 
 import fs from "fs";
 import path from "path";
@@ -469,82 +474,18 @@ async function bookClass({
 
   const page = await browser.newPage();
   
-  // CRITICAL: Stealth mode - Make Puppeteer look like a real browser
-  // This bypasses anti-scraping detection that prevents autocomplete from working
-  dlog("Applying stealth techniques to bypass anti-scraping detection...");
+  // CRITICAL: puppeteer-extra-plugin-stealth is already applied via puppeteer.use(StealthPlugin())
+  // This plugin handles most anti-scraping detection automatically
+  dlog("Stealth plugin is active (puppeteer-extra-plugin-stealth)");
   
-  // 1. Set realistic User-Agent (Chrome on Windows)
-  await page.setUserAgent(
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  );
-  
-  // 2. Override navigator.webdriver (most important - this is how sites detect automation)
-  await page.evaluateOnNewDocument(() => {
-    // Remove webdriver property
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => undefined,
-    });
-    
-    // Override Chrome runtime
-    window.chrome = {
-      runtime: {},
-    };
-    
-    // Add realistic plugins
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => [1, 2, 3, 4, 5], // Fake plugins array
-    });
-    
-    // Add realistic languages
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en'],
-    });
-    
-    // Override permissions
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) =>
-      parameters.name === 'notifications'
-        ? Promise.resolve({ state: Notification.permission })
-        : originalQuery(parameters);
-    
-    // Override getBattery (if it exists)
-    if (navigator.getBattery) {
-      navigator.getBattery = () => Promise.resolve({
-        charging: true,
-        chargingTime: 0,
-        dischargingTime: Infinity,
-        level: 1,
-      });
-    }
-    
-    // Add realistic connection
-    Object.defineProperty(navigator, 'connection', {
-      get: () => ({
-        effectiveType: '4g',
-        rtt: 50,
-        downlink: 10,
-        saveData: false,
-      }),
-    });
-    
-    // Override toString to hide automation
-    const originalToString = Function.prototype.toString;
-    Function.prototype.toString = function() {
-      if (this === navigator.webdriver) {
-        return 'undefined';
-      }
-      return originalToString.call(this);
-    };
-  });
-  
-  // 3. Set realistic viewport and screen properties
+  // Set realistic viewport (stealth plugin handles User-Agent and other properties)
   await page.setViewport({
     width: 1920,
     height: 1080,
     deviceScaleFactor: 1,
   });
   
-  // 4. Set extra headers to look like a real browser
+  // Set extra headers to look like a real browser
   await page.setExtraHTTPHeaders({
     'Accept-Language': 'en-US,en;q=0.9',
     'Accept-Encoding': 'gzip, deflate, br',
@@ -556,7 +497,7 @@ async function bookClass({
     'Sec-Fetch-Dest': 'document',
   });
   
-  // 5. Override permissions (for both domains)
+  // Override permissions (for both domains)
   const context = browser.defaultBrowserContext();
   await context.overridePermissions('https://partners.gokenko.com', [
     'geolocation',
@@ -565,9 +506,9 @@ async function bookClass({
   await context.overridePermissions('https://kenko.app', [
     'geolocation',
     'notifications',
-  ]);
+  });
   
-  dlog("✓ Stealth techniques applied successfully");
+  dlog("✓ Page configured with stealth plugin");
   
   // Small delay to ensure page is stable
   await sleep(500);
