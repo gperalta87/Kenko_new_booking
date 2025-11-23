@@ -2259,11 +2259,12 @@ async function bookClass({
                 await element.scrollIntoView();
                 await sleep(300);
                 
-                // Click at the center of the element, avoiding any buttons inside
+                // Click at the left side of the element, avoiding any buttons inside
                 const box = await element.boundingBox();
                 if (box) {
-                  // Click slightly left of center to avoid delete buttons (usually on the right)
-                  await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2);
+                  // Click at 12% from left edge to avoid delete buttons (usually on the right)
+                  await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
+                  dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
                 } else {
                   await element.click();
                 }
@@ -2304,14 +2305,15 @@ async function bookClass({
                   await element.scrollIntoView();
                   await sleep(300);
                   
-                  // Click at the center-left of the element to avoid delete buttons
-                  const box = await element.boundingBox();
-                  if (box) {
-                    // Click at 30% from left (avoiding right side where delete buttons usually are)
-                    await page.mouse.click(box.x + box.width * 0.3, box.y + box.height / 2);
-                  } else {
-                    await element.click();
-                  }
+                // Click at the left side of the element to avoid delete buttons
+                const box = await element.boundingBox();
+                if (box) {
+                  // Click at 12% from left edge (delete buttons are usually on the right)
+                  await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
+                  dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
+                } else {
+                  await element.click();
+                }
                   clicked = true;
                   dlog(`  ✓ Clicked matching element at index ${i}`);
                   break;
@@ -2350,55 +2352,42 @@ async function bookClass({
                 let clickTarget = event;
                 
                 // Check if event contains buttons - if so, click the main container, not the buttons
-                const buttons = event.querySelectorAll('button, [role="button"], [class*="delete"], [class*="remove"]');
-                if (buttons.length > 0) {
-                  // Click the center of the event, avoiding buttons
-                  const rect = event.getBoundingClientRect();
-                  const centerX = rect.left + rect.width / 2;
-                  const centerY = rect.top + rect.height / 2;
-                  
-                  // Check if center point is over a button
-                  let overButton = false;
-                  for (const btn of buttons) {
-                    const btnRect = btn.getBoundingClientRect();
-                    if (centerX >= btnRect.left && centerX <= btnRect.right &&
-                        centerY >= btnRect.top && centerY <= btnRect.bottom) {
-                      overButton = true;
-                      break;
-                    }
+                const buttons = event.querySelectorAll('button, [role="button"], [class*="delete"], [class*="remove"], [class*="close"], [aria-label*="delete" i], [aria-label*="remove" i]');
+                
+                // Always click on the LEFT side of the event (10-15% from left edge) to avoid delete buttons
+                // Delete buttons are usually on the right side
+                const rect = event.getBoundingClientRect();
+                const clickX = rect.left + rect.width * 0.12; // Click at 12% from left edge
+                const clickY = rect.top + rect.height / 2; // Vertical center
+                
+                // Double-check that this click point is not over any button
+                let safeToClick = true;
+                for (const btn of buttons) {
+                  const btnRect = btn.getBoundingClientRect();
+                  if (clickX >= btnRect.left && clickX <= btnRect.right &&
+                      clickY >= btnRect.top && clickY <= btnRect.bottom) {
+                    safeToClick = false;
+                    break;
                   }
-                  
-                  // If center is over a button, click slightly offset
-                  if (overButton) {
-                    const offsetX = rect.left + rect.width * 0.3; // Click left of center
-                    const offsetY = rect.top + rect.height / 2;
-                    const clickEvent = new MouseEvent('click', {
-                      bubbles: true,
-                      cancelable: true,
-                      view: window,
-                      clientX: offsetX,
-                      clientY: offsetY
-                    });
-                    event.dispatchEvent(clickEvent);
-                    return true;
-                  }
+                }
+                
+                // If click point is over a button, move even more to the left
+                let finalClickX = clickX;
+                if (!safeToClick) {
+                  finalClickX = rect.left + rect.width * 0.05; // Click at 5% from left edge
+                  dlog(`  Click point was over button, moving to 5% from left`);
                 }
                 
                 // Scroll into view
                 event.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 
-                // Click the main event element (not buttons inside it)
-                // Use a click at the center of the element
-                const rect = event.getBoundingClientRect();
-                const centerX = rect.left + rect.width / 2;
-                const centerY = rect.top + rect.height / 2;
-                
+                // Click at the safe position (left side of event)
                 const clickEvent = new MouseEvent('click', {
                   bubbles: true,
                   cancelable: true,
                   view: window,
-                  clientX: centerX,
-                  clientY: centerY
+                  clientX: finalClickX,
+                  clientY: clickY
                 });
                 
                 event.dispatchEvent(clickEvent);
