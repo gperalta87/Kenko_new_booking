@@ -2414,7 +2414,8 @@ async function bookClass({
         // Take screenshot immediately after clicking class to see what appeared
         await takeScreenshot('after-class-click');
         
-        // Check if a delete modal appeared (this means we clicked the wrong element)
+        // The delete modal ALWAYS appears when clicking a class - we need to dismiss it
+        dlog(`Checking for delete modal (expected to appear)...`);
         const deleteModalAppeared = await page.evaluate(() => {
           const bodyText = (document.body.textContent || '').toLowerCase();
           if (bodyText.includes('delete class instance') || bodyText.includes('permanently delete')) {
@@ -2425,7 +2426,7 @@ async function bookClass({
           for (const btn of buttons) {
             if (btn.offsetParent === null) continue;
             const btnText = (btn.textContent || '').toLowerCase();
-            if (btnText.includes('yes, delete') || btnText.includes('delete')) {
+            if (btnText.includes('yes, delete') || (btnText.includes('delete') && btnText.includes('class'))) {
               // Check if it's in a modal context
               let parent = btn.parentElement;
               let depth = 0;
@@ -2443,74 +2444,86 @@ async function bookClass({
         }).catch(() => false);
         
         if (deleteModalAppeared) {
-          logToFile(`❌ ERROR: Delete modal appeared after clicking class - we clicked the wrong element!`);
-          dlog(`❌ ERROR: Delete modal appeared after clicking class - we clicked the wrong element!`);
+          logToFile(`[MODAL] Delete modal appeared (expected) - dismissing it...`);
+          dlog(`Delete modal appeared (expected) - dismissing it...`);
           
-          // Try to dismiss the modal
+          // Dismiss the delete modal by clicking "Go back" button
           const dismissed = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button'));
+            const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
             for (const btn of buttons) {
               if (btn.offsetParent === null) continue;
               const text = (btn.textContent || '').trim().toLowerCase();
-              if (text === 'go back' || text.includes('back')) {
+              // Look for "Go back" button
+              if (text === 'go back' || text === 'go back' || text.includes('back')) {
                 btn.click();
                 return true;
               }
             }
-            // Try Escape key
             return false;
           }).catch(() => false);
           
           if (dismissed) {
             await sleep(1000);
-            dlog(`✓ Dismissed delete modal, will try clicking class again`);
-            // We'll need to retry clicking the class, but for now just log the error
+            dlog(`✓ Successfully dismissed delete modal by clicking "Go back"`);
+            logToFile(`✓ Successfully dismissed delete modal`);
           } else {
+            // Fallback: try Escape key
+            dlog(`"Go back" button not found, trying Escape key...`);
             await page.keyboard.press('Escape');
             await sleep(1000);
+            dlog(`✓ Dismissed delete modal using Escape key`);
           }
           
-          throw new Error(`Clicked wrong element - delete modal appeared instead of booking dialog`);
+          // Take screenshot after dismissing modal
+          await takeScreenshot('after-dismissing-delete-modal');
+        } else {
+          dlog(`No delete modal detected (may have already been dismissed or not appeared)`);
         }
         
-        // Verify the click worked by checking for common indicators:
-        // - Booking dialog/modal appears
-        // - Event becomes selected/highlighted
-        // - A form or details panel appears
-        // - "Book Customer" button is visible
+        // Verify the click worked by checking for "Book Customer" button
+        // This should be visible after dismissing the delete modal
+        await sleep(1000); // Wait for modal to fully load after dismissing delete modal
+        
         const clickVerified = await page.evaluate(() => {
-          // Check for "Book Customer" button - this is the key indicator
+          // Check for "Book Customer" button - this is the key indicator that booking dialog is open
           const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
             if (btn.offsetParent === null) return false;
-            const text = (btn.textContent || '').toLowerCase();
-            return text.includes('book customer') || text.includes('book');
+            const text = (btn.textContent || '').trim().toLowerCase();
+            return text === 'book customer' || text.includes('book customer');
           });
-          if (bookCustomerButton) {
-            return true;
-          }
           
-          // Check for booking dialog, modal, or details panel
-          const bookingDialog = document.querySelector('div[class*="modal"], div[class*="dialog"], div[class*="booking"], div[class*="details"], div[class*="panel"]');
-          if (bookingDialog && bookingDialog.offsetParent !== null) {
-            return true;
-          }
-          
-          // Check if any event is selected/highlighted
-          const selectedEvent = document.querySelector('[class*="selected"], [class*="active"], [class*="highlight"]');
-          if (selectedEvent && selectedEvent.offsetParent !== null) {
-            return true;
-          }
-          
-          return false;
-        }).catch(() => false);
+          return {
+            bookCustomerButtonVisible: bookCustomerButton !== undefined,
+            bookCustomerButtonText: bookCustomerButton ? bookCustomerButton.textContent : null
+          };
+        }).catch(() => ({ bookCustomerButtonVisible: false, bookCustomerButtonText: null }));
         
-        if (clickVerified) {
-          dlog(`✓ Click verified - booking dialog/details panel appeared with Book Customer button`);
+        if (clickVerified.bookCustomerButtonVisible) {
+          dlog(`✓ Click verified - "Book Customer" button is visible: "${clickVerified.bookCustomerButtonText}"`);
+          logToFile(`✓ Booking dialog opened successfully - "Book Customer" button visible`);
         } else {
-          dlog(`⚠ Click may not have registered - no booking dialog detected, but continuing...`);
+          logToFile(`⚠ WARNING: "Book Customer" button not found after dismissing delete modal`);
+          dlog(`⚠ WARNING: "Book Customer" button not found - booking dialog may not be fully loaded`);
+          // Wait a bit more and check again
+          await sleep(1000);
+          const retryCheck = await page.evaluate(() => {
+            const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+              if (btn.offsetParent === null) return false;
+              const text = (btn.textContent || '').trim().toLowerCase();
+              return text === 'book customer' || text.includes('book customer');
+            });
+            return bookCustomerButton !== undefined;
+          }).catch(() => false);
+          
+          if (!retryCheck) {
+            logToFile(`❌ ERROR: "Book Customer" button still not found after retry`);
+            throw new Error(`Booking dialog did not open - "Book Customer" button not found`);
+          } else {
+            dlog(`✓ "Book Customer" button found on retry`);
+          }
         }
         
-        await sleep(800); // Optimized: reduced from 1500ms
+        await sleep(500); // Final wait before proceeding
       } else {
         dlog(`✗ Could not find class at ${targetTime}`);
         dlog(`  Reason: ${classInfo.reason}`);
