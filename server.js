@@ -1734,8 +1734,10 @@ async function bookClass({
           
           if (dateSelected) {
             dlog(`✓ Date picker closed, date selected successfully`);
+            await takeScreenshot('after-date-selected-direct');
           } else {
             dlog(`⚠ Date picker still open, but continuing...`);
+            await takeScreenshot('after-date-selected-direct-picker-open');
           }
         } else {
           dlog(`Could not find target date directly, navigating date picker...`);
@@ -1880,9 +1882,11 @@ async function bookClass({
               
               if (dateSelected) {
                 dlog(`✓ Date picker closed, date should be selected`);
+                await takeScreenshot('after-date-selected-navigation');
                 break; // Exit navigation loop
               } else {
                 dlog(`⚠ Date picker still open, may need to click again`);
+                await takeScreenshot('after-date-selected-navigation-picker-open');
               }
             } else {
               dlog(`✗ Could not find day ${day} in date picker: ${dayClicked.reason}`);
@@ -1931,16 +1935,18 @@ async function bookClass({
       
       // Step 5: Wait for calendar events to load after selecting date
       dlog(`Step 5: Waiting for events to load after date selection...`);
-      await sleep(2000);
+      await takeScreenshot('after-date-selection');
+      await sleep(3000); // Increased wait time for calendar to update
       
       try {
-        await page.waitForSelector('mwl-calendar-week-view-event, div.checker-details, [class*="calendar-event"], [class*="event"]', { timeout: 10000, visible: true }).catch(() => {
+        await page.waitForSelector('mwl-calendar-week-view-event, div.checker-details, [class*="calendar-event"], [class*="event"]', { timeout: 15000, visible: true }).catch(() => {
           dlog(`Events not immediately visible, continuing...`);
         });
       } catch (e) {
         dlog(`Warning: Timeout waiting for events, but continuing...`);
       }
-      await sleep(2000);
+      await sleep(3000); // Increased wait time
+      await takeScreenshot('before-looking-for-class');
       
       // Step 6: Find and click the class at target time
       dlog(`Step 6: Looking for class at ${targetHour}:${targetMinute.toString().padStart(2, '0')}...`);
@@ -1993,13 +1999,35 @@ async function bookClass({
           const eventText = event.textContent || '';
           const className = event.className || '';
           
-          // Skip headers/navigation
+          // Skip headers/navigation - more aggressive filtering
           if (eventText.includes('Week') || eventText.includes('All instructors') || eventText.includes('TODAY') || 
-              eventText.includes('Filters') || eventText.includes('Add event')) continue;
-          if (className.includes('header') || className.includes('navigation') || className.includes('title')) continue;
+              eventText.includes('Filters') || eventText.includes('Add event') ||
+              eventText.includes('Monday') || eventText.includes('Tuesday') || eventText.includes('Wednesday') ||
+              eventText.includes('Thursday') || eventText.includes('Friday') || eventText.includes('Saturday') ||
+              eventText.includes('Sunday') || eventText.includes('Nov 24') || eventText.includes('Nov 25') ||
+              eventText.includes('Nov 26') || eventText.includes('Nov 27') || eventText.includes('Nov 28') ||
+              eventText.includes('Nov 29') || eventText.match(/^\s*\d{1,2}\s*AM\s*$/i)) continue;
+          if (className.includes('header') || className.includes('navigation') || className.includes('title') ||
+              className.includes('day-header') || className.includes('time-header')) continue;
           
-          // Extract time from event text - look for patterns like "8:00am", "8:00 am", "8:0am", etc.
-          const timeMatch = eventText.match(/\b(\d{1,2}):(\d{1,2})\s*(am|pm|AM|PM)?\b/i);
+          // Extract time from event text - find FIRST time pattern that appears early in text
+          // Class times usually appear right after the class name (e.g., "Ponte Pila9:00am")
+          // Use matchAll to find all times, then take the first one that appears early
+          const timeMatches = Array.from(eventText.matchAll(/\b(\d{1,2}):(\d{1,2})\s*(am|pm|AM|PM)\b/gi));
+          if (timeMatches.length === 0) continue;
+          
+          // Prioritize the first match that appears within first 80 characters (where class time usually is)
+          let timeMatch = null;
+          for (const match of timeMatches) {
+            if (match.index < 80) {
+              timeMatch = match;
+              break;
+            }
+          }
+          // If no early match found, use the very first match
+          if (!timeMatch && timeMatches.length > 0) {
+            timeMatch = timeMatches[0];
+          }
           if (!timeMatch) continue;
           
           const eventHour = parseInt(timeMatch[1]);
