@@ -345,58 +345,23 @@ async function bookClass({
     "--enable-automation",
     "--password-store=basic",
     "--use-mock-keychain",
-    // Additional flags to prevent X11/D-Bus errors in containers
-    "--disable-setuid-sandbox",
-    "--disable-background-networking",
-    "--disable-default-apps",
-    "--disable-sync",
-    "--disable-translate",
     "--hide-scrollbars",
-    "--mute-audio",
-    "--no-first-run",
-    "--safebrowsing-disable-auto-update",
     "--ignore-certificate-errors",
     "--ignore-ssl-errors",
-    "--ignore-certificate-errors-spki-list"
+    "--ignore-certificate-errors-spki-list",
+    // Critical flags for container compatibility - prevent X11 detection
+    "--single-process",  // Run in single process mode (helps in containers)
+    "--no-zygote",       // Disable zygote process (helps in containers)
   ];
 
-  // Add headless flag only if running in headless mode
+  // Always add headless flag for production/headless mode
   if (headless) {
     launchArgs.push("--headless=new");
-    // For headless mode, add single-process flag for better container compatibility
-    launchArgs.push("--single-process");
   }
 
   dlog(`Launching browser with executablePath: ${executablePath || 'default'}`);
   dlog(`Headless mode: ${headless} (showBrowser: ${showBrowser})`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
-
-  // For headless mode, ensure DISPLAY and D-Bus env vars are properly unset
-  // Puppeteer's bundled Chromium works best in headless mode without X11
-  // Always do this cleanup, especially important for Railway/containerized environments
-  const displayBefore = process.env.DISPLAY || 'not set';
-  dlog(`DISPLAY before cleanup: ${displayBefore}`);
-  
-  // Aggressively delete environment variables to prevent X11 detection
-  // Delete first, then set to empty, then delete again to ensure they're gone
-  if (process.env.DISPLAY) delete process.env.DISPLAY;
-  if (process.env.XAUTHORITY) delete process.env.XAUTHORITY;
-  if (process.env.DBUS_SESSION_BUS_ADDRESS) delete process.env.DBUS_SESSION_BUS_ADDRESS;
-  if (process.env.DBUS_SYSTEM_BUS_ADDRESS) delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
-  
-  // Set to empty strings
-  process.env.DISPLAY = '';
-  process.env.XAUTHORITY = '';
-  process.env.DBUS_SESSION_BUS_ADDRESS = '';
-  process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
-  
-  // Delete again to ensure they're truly gone
-  delete process.env.DISPLAY;
-  delete process.env.XAUTHORITY;
-  delete process.env.DBUS_SESSION_BUS_ADDRESS;
-  delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
-  
-  dlog(`Environment variables cleaned - DISPLAY was: ${displayBefore}, now deleted`);
   
   // Use headless: true for Railway/containers (more reliable), 'new' for local, false for visible browser
   let browser;
@@ -406,11 +371,9 @@ async function bookClass({
   try {
     dlog(`Launching browser with headless=${headlessMode}...`);
     
-    // Ensure environment is clean before launching - spawn with clean env
-    // Save current env, clean it, launch, then restore
-    const originalEnv = { ...process.env };
-    
-    // Remove X11/D-Bus vars from process.env before launch
+    // Final cleanup - ensure X11/D-Bus vars are completely removed before launch
+    // DO NOT set them to empty strings - Chromium can detect empty strings
+    // Just delete them completely
     delete process.env.DISPLAY;
     delete process.env.XAUTHORITY;
     delete process.env.DBUS_SESSION_BUS_ADDRESS;
