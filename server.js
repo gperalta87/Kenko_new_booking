@@ -506,7 +506,7 @@ async function bookClass({
   await context.overridePermissions('https://kenko.app', [
     'geolocation',
     'notifications',
-  });
+  ]);
   
   dlog("✓ Page configured with stealth plugin");
   
