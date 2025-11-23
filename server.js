@@ -3160,6 +3160,39 @@ app.get("/health", (_req, res) => {
   res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
+// Screenshot endpoints - serve screenshots from /tmp directory
+app.get("/screenshots", (req, res) => {
+  try {
+    const files = fs.readdirSync(LOG_DIR)
+      .filter(f => f.startsWith('screenshot-') && f.endsWith('.png'))
+      .sort()
+      .reverse(); // Most recent first
+    res.json({ 
+      screenshots: files,
+      count: files.length,
+      directory: LOG_DIR
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get("/screenshots/:filename", (req, res) => {
+  const filename = req.params.filename;
+  // Security: only allow screenshot files
+  if (!filename.startsWith('screenshot-') || !filename.endsWith('.png')) {
+    return res.status(400).json({ error: "Invalid filename" });
+  }
+  
+  const filePath = path.join(LOG_DIR, filename);
+  
+  if (fs.existsSync(filePath)) {
+    res.sendFile(filePath);
+  } else {
+    res.status(404).json({ error: "Screenshot not found" });
+  }
+});
+
 // Booking endpoint
 app.post("/book", async (req, res) => {
   console.log(`[REQ] POST /book body=`, JSON.stringify(req.body || {}));
