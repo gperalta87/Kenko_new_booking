@@ -604,6 +604,20 @@ async function bookClass({
       // Use page.type() like in the reference code
       dlog("Clicking on gym name input field");
       
+      // Set up network monitoring for autocomplete API calls BEFORE typing
+      const autocompleteRequests = [];
+      const requestHandler = (request) => {
+        const url = request.url();
+        if (url.includes('search') || url.includes('autocomplete') || url.includes('gym') || url.includes('business') || url.includes('location')) {
+          dlog(`[NETWORK] Autocomplete request detected: ${url.substring(0, 150)}`);
+          autocompleteRequests.push({
+            url: url,
+            timestamp: Date.now()
+          });
+        }
+      };
+      page.on('request', requestHandler);
+      
       const gymNameLower = gymName.toLowerCase();
       dlog(`Typing gym name character by character: ${gymNameLower}`);
       
@@ -624,25 +638,61 @@ async function bookClass({
         // Railway needs slower, more realistic typing - don't set value directly, let keyboard.type() do it
         dlog(`Typing "${gymNameLower}" character by character (Railway-optimized, keyboard only)...`);
         
-        // Ensure input is focused and ready
+        // Ensure input is focused and ready - click first to ensure it's active
+        await page.click(foundSelector);
+        await sleep(200);
         await page.focus(foundSelector);
         await sleep(300);
+        
+        // Trigger focus event to ensure autocomplete is listening
+        await page.evaluate((selector) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            input.focus();
+            input.dispatchEvent(new Event('focus', { bubbles: true }));
+            input.dispatchEvent(new Event('click', { bubbles: true }));
+          }
+        }, foundSelector);
+        await sleep(200);
         
         // Type each character slowly using ONLY keyboard.type() - this triggers autocomplete naturally
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
           
           // Type the character with realistic delay - Railway needs slower typing
-          await page.keyboard.type(char, { delay: 200 }); // Increased delay for Railway
+          await page.keyboard.type(char, { delay: 250 }); // Increased delay for Railway
           
           // Wait between characters to allow autocomplete to process
-          await sleep(500); // Increased wait for Railway - autocomplete needs time to fetch results
+          await sleep(600); // Increased wait for Railway - autocomplete needs time to fetch results
         }
+        
+        // After typing, trigger input event one more time to ensure autocomplete fires
+        await page.evaluate((selector) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+            input.dispatchEvent(new Event('keyup', { bubbles: true, cancelable: true }));
+          }
+        }, foundSelector);
+        await sleep(500);
         
         dlog("✓ Finished typing with keyboard.type() only");
         
+        // Log network requests detected
+        if (autocompleteRequests.length > 0) {
+          logToFile(`[NETWORK] Detected ${autocompleteRequests.length} autocomplete requests during typing`);
+          autocompleteRequests.forEach((req, i) => {
+            logToFile(`[NETWORK] Request ${i+1}: ${req.url.substring(0, 100)}`);
+          });
+        } else {
+          logToFile(`[NETWORK] WARNING: No autocomplete API requests detected - autocomplete may not be triggering`);
+        }
+        
+        // Remove network listener
+        page.removeListener('request', requestHandler);
+        
         // Additional wait after completing typing - Railway needs more time for autocomplete
-        await sleep(3000); // Increased wait for Railway autocomplete to appear
+        await sleep(5000); // Increased wait for Railway autocomplete to appear
       } else {
         // Fallback: try to use the element directly
         dlog("Using element-based typing as fallback");
@@ -657,20 +707,45 @@ async function bookClass({
         // CRITICAL: Type character by character using ONLY keyboard.type() to trigger autocomplete
         dlog(`Typing "${gymNameLower}" character by character (Railway-optimized, keyboard only, fallback)...`);
         
-        // Ensure input is focused and ready
+        // Ensure input is focused and ready - click first to ensure it's active
+        await inputElement.click();
+        await sleep(200);
         await inputElement.focus();
         await sleep(300);
+        
+        // Trigger focus event to ensure autocomplete is listening
+        await page.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+          const input = inputs.find(i => i.offsetParent !== null);
+          if (input) {
+            input.focus();
+            input.dispatchEvent(new Event('focus', { bubbles: true }));
+            input.dispatchEvent(new Event('click', { bubbles: true }));
+          }
+        });
+        await sleep(200);
         
         // Type each character slowly using ONLY keyboard.type() - this triggers autocomplete naturally
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
           
           // Type the character with realistic delay - Railway needs slower typing
-          await page.keyboard.type(char, { delay: 200 }); // Increased delay for Railway
+          await page.keyboard.type(char, { delay: 250 }); // Increased delay for Railway
           
           // Wait between characters to allow autocomplete to process
-          await sleep(500); // Increased wait for Railway - autocomplete needs time to fetch results
+          await sleep(600); // Increased wait for Railway - autocomplete needs time to fetch results
         }
+        
+        // After typing, trigger input event one more time to ensure autocomplete fires
+        await page.evaluate(() => {
+          const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+          const input = inputs.find(i => i.offsetParent !== null);
+          if (input) {
+            input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+            input.dispatchEvent(new Event('keyup', { bubbles: true, cancelable: true }));
+          }
+        });
+        await sleep(500);
         
         dlog("✓ Finished typing with keyboard.type() only (fallback)");
         
