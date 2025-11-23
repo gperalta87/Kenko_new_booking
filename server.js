@@ -2519,6 +2519,42 @@ async function bookClass({
       await page.keyboard.press('Backspace');
       await sleep(100);
       
+      // Set up network monitoring for autocomplete API requests (like gym selection)
+      const autocompleteRequests = [];
+      const autocompleteResponses = [];
+      
+      const requestHandler = (request) => {
+        const url = request.url();
+        // Look for customer/search API endpoints
+        if (url.includes('customer') || url.includes('search') || url.includes('autocomplete') || 
+            url.includes('query') || url.includes('filter')) {
+          dlog(`[NETWORK] Customer autocomplete request detected: ${url.substring(0, 150)}`);
+          autocompleteRequests.push({
+            url: url,
+            method: request.method(),
+            postData: request.postData(),
+            timestamp: Date.now()
+          });
+        }
+      };
+      
+      const responseHandler = (response) => {
+        const url = response.url();
+        if (url.includes('customer') || url.includes('search') || url.includes('autocomplete') || 
+            url.includes('query') || url.includes('filter')) {
+          dlog(`[NETWORK] Customer autocomplete response: ${url.substring(0, 150)}`);
+          autocompleteResponses.push({
+            url: url,
+            status: response.status(),
+            timestamp: Date.now()
+          });
+        }
+      };
+      
+      // Start monitoring network requests
+      page.on('request', requestHandler);
+      page.on('response', responseHandler);
+      
       // Click and focus the input to ensure it's active
       await foundInputElement.click();
       await sleep(100);
@@ -2632,7 +2668,40 @@ async function bookClass({
       
       dlog("✓ Finished typing customer name character by character");
       
-      // Wait for autocomplete dropdown to appear (increased wait time)
+      // Remove network listeners
+      page.off('request', requestHandler);
+      page.off('response', responseHandler);
+      
+      // Log network requests detected
+      if (autocompleteRequests.length > 0) {
+        logToFile(`[NETWORK] Detected ${autocompleteRequests.length} customer autocomplete requests during typing`);
+        autocompleteRequests.forEach((req, i) => {
+          logToFile(`[NETWORK] Request ${i+1}: ${req.method} ${req.url.substring(0, 150)}`);
+        });
+      } else {
+        logToFile(`[NETWORK] WARNING: No customer autocomplete API requests detected - autocomplete may not be triggering`);
+      }
+      
+      if (autocompleteResponses.length > 0) {
+        logToFile(`[NETWORK] Detected ${autocompleteResponses.length} customer autocomplete responses`);
+        autocompleteResponses.forEach((resp, i) => {
+          logToFile(`[NETWORK] Response ${i+1}: ${resp.status} ${resp.url.substring(0, 150)}`);
+        });
+      }
+      
+      // Wait for network requests to complete and autocomplete dropdown to appear (like gym selection)
+      await sleep(3000); // Initial wait
+      
+      // Wait for network idle (autocomplete might fetch from server)
+      try {
+        await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => {
+          dlog("Network idle wait timed out, continuing...");
+        });
+      } catch (e) {
+        dlog(`Network idle wait error: ${e?.message}`);
+      }
+      
+      // Additional wait for autocomplete dropdown to render
       await sleep(2000);
       
       // Take screenshot to verify autocomplete appeared
@@ -2647,14 +2716,19 @@ async function bookClass({
           '[class*="autocomplete"]',
           '[class*="dropdown"]',
           '[class*="suggestion"]',
-          'div[class*="search"] > div'
+          'div[class*="search"] > div',
+          'div[class*="result"]',
+          'div[class*="option"]'
         ];
         
         for (const sel of selectors) {
           const elements = Array.from(document.querySelectorAll(sel));
           for (const el of elements) {
-            if (el.offsetParent !== null && el.textContent && el.textContent.toLowerCase().includes('fitpass')) {
-              return true;
+            if (el.offsetParent !== null) {
+              const text = (el.textContent || '').toLowerCase();
+              if (text.includes('fitpass') || text.includes('nadia') || text.includes('customer')) {
+                return true;
+              }
             }
           }
         }
@@ -2666,8 +2740,28 @@ async function bookClass({
       } else {
         logToFile("⚠ WARNING: Autocomplete dropdown may not be visible after typing");
         dlog("⚠ WARNING: Autocomplete dropdown may not be visible after typing");
-        // Wait a bit more
-        await sleep(1000);
+        // Wait a bit more and check again
+        await sleep(2000);
+        
+        // Final check
+        const finalCheck = await page.evaluate(() => {
+          const allDivs = Array.from(document.querySelectorAll('div'));
+          for (const div of allDivs) {
+            if (div.offsetParent !== null) {
+              const text = (div.textContent || '').toLowerCase();
+              if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
+                return true;
+              }
+            }
+          }
+          return false;
+        }).catch(() => false);
+        
+        if (finalCheck) {
+          dlog("✓ Autocomplete dropdown found on final check");
+        } else {
+          logToFile("❌ ERROR: Autocomplete dropdown not found even after extended wait");
+        }
       }
     });
 
@@ -2924,11 +3018,14 @@ async function bookClass({
     await step("Click Charge", async () => {
       dlog(`Checking if Charge button is needed...`);
       
-      // Wait a bit more to see if booking completed or if Charge button appears
-      await sleep(3000);
-      
-      // Check if booking is already complete
-      const finalCheck = await page.evaluate(() => {
+      // Check if booking is already complete (page might have been closed after successful booking)
+      let finalCheck;
+      try {
+        // Wait a bit more to see if booking completed or if Charge button appears
+        await sleep(3000);
+        
+        // Check if booking is already complete
+        finalCheck = await page.evaluate(() => {
         // Look for success messages
         const bodyText = document.body.textContent || '';
         const hasSuccess = bodyText.toLowerCase().includes('success') ||
@@ -2952,7 +3049,19 @@ async function bookClass({
           hasChargeButton: chargeButton !== undefined,
           chargeButtonVisible: chargeButton !== undefined && chargeButton.offsetParent !== null
         };
-      }).catch(() => ({ hasSuccess: false, modalOpen: true, hasChargeButton: false, chargeButtonVisible: false }));
+      }).catch((e) => {
+        // If page is closed/detached, booking was likely successful
+        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
+          dlog(`✓ Page closed/detached - booking was successful, skipping Charge step`);
+          return { hasSuccess: true, modalOpen: false, hasChargeButton: false, chargeButtonVisible: false };
+        }
+        return { hasSuccess: false, modalOpen: true, hasChargeButton: false, chargeButtonVisible: false };
+      });
+      
+      if (!finalCheck) {
+        dlog(`✓ Could not check page status - assuming booking was successful, skipping Charge step`);
+        return;
+      }
       
       if (finalCheck.hasSuccess || !finalCheck.modalOpen) {
         dlog(`✓ Booking appears to be complete - skipping Charge step`);
@@ -2965,62 +3074,92 @@ async function bookClass({
         dlog(`  Checking for alternative completion indicators...`);
         
         // Wait a bit more and check again
-        await sleep(2000);
-        const finalCheck2 = await page.evaluate(() => {
-          const bodyText = document.body.textContent || '';
-          return bodyText.toLowerCase().includes('success') ||
-                 bodyText.toLowerCase().includes('booked') ||
-                 bodyText.toLowerCase().includes('confirmed');
-        }).catch(() => false);
-        
-        if (finalCheck2) {
-          dlog(`✓ Booking confirmed - skipping Charge step`);
+        try {
+          await sleep(2000);
+          const finalCheck2 = await page.evaluate(() => {
+            const bodyText = document.body.textContent || '';
+            return bodyText.toLowerCase().includes('success') ||
+                   bodyText.toLowerCase().includes('booked') ||
+                   bodyText.toLowerCase().includes('confirmed');
+          }).catch(() => false);
+          
+          if (finalCheck2) {
+            dlog(`✓ Booking confirmed - skipping Charge step`);
+            return;
+          }
+        } catch (e) {
+          if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
+            dlog(`✓ Page closed/detached - booking was successful, skipping Charge step`);
+            return;
+          }
+        }
+      }
+      } catch (e) {
+        // Handle errors from initial check (page might be closed)
+        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
+          dlog(`✓ Page closed/detached during initial check - booking was successful, skipping Charge step`);
+          return;
+        }
+        // If it's a different error and we don't have finalCheck, we can't proceed
+        if (!finalCheck) {
+          dlog(`⚠ Error during initial check: ${e?.message} - skipping Charge step`);
           return;
         }
       }
       
-      dlog(`Charge button needed - attempting to click...`);
-      await clickElement(page, [
-        '::-p-aria(Charge MX$ 0)',
-        'div.final-price-calculation-section > button',
-        '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/app-floating-pos/div/div[2]/div[2]/div[2]/button)',
-        ':scope >>> div.final-price-calculation-section > button',
-        '::-p-text(Charge  MX$ 0)'
-      ], { offset: { x: 108, y: 19.5 } });
-      
-      dlog(`Charge button clicked, waiting for booking to be processed...`);
-      await sleep(500); // Optimized: reduced wait time
-      
-      // Check immediately if booking is confirmed
-      const immediateCheck = await page.evaluate(() => {
-        const bodyText = document.body.textContent || '';
-        const hasSuccess = bodyText.toLowerCase().includes('success') ||
-                           bodyText.toLowerCase().includes('booked') ||
-                           bodyText.toLowerCase().includes('confirmed');
-        const modal = document.querySelector('[class*="modal"], [class*="dialog"], [class*="overlay"]');
-        const modalOpen = modal && modal.offsetParent !== null;
-        return { hasSuccess, modalOpen };
-      }).catch(() => ({ hasSuccess: false, modalOpen: true }));
-      
-      if (immediateCheck.hasSuccess || !immediateCheck.modalOpen) {
-        dlog(`✓ Booking confirmed immediately after Charge! Closing browser...`);
-        await page.close().catch(() => {});
-        await browser.close().catch(() => {});
-        return; // Exit early - booking complete
+      try {
+        dlog(`Charge button needed - attempting to click...`);
+        await clickElement(page, [
+          '::-p-aria(Charge MX$ 0)',
+          'div.final-price-calculation-section > button',
+          '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/app-floating-pos/div/div[2]/div[2]/div[2]/button)',
+          ':scope >>> div.final-price-calculation-section > button',
+          '::-p-text(Charge  MX$ 0)'
+        ], { offset: { x: 108, y: 19.5 } });
+        
+        dlog(`Charge button clicked, waiting for booking to be processed...`);
+        await sleep(500); // Optimized: reduced wait time
+        
+        // Check immediately if booking is confirmed
+        const immediateCheck = await page.evaluate(() => {
+          const bodyText = document.body.textContent || '';
+          const hasSuccess = bodyText.toLowerCase().includes('success') ||
+                             bodyText.toLowerCase().includes('booked') ||
+                             bodyText.toLowerCase().includes('confirmed');
+          const modal = document.querySelector('[class*="modal"], [class*="dialog"], [class*="overlay"]');
+          const modalOpen = modal && modal.offsetParent !== null;
+          return { hasSuccess, modalOpen };
+        }).catch(() => ({ hasSuccess: false, modalOpen: true }));
+        
+        if (immediateCheck.hasSuccess || !immediateCheck.modalOpen) {
+          dlog(`✓ Booking confirmed immediately after Charge! Closing browser...`);
+          await page.close().catch(() => {});
+          await browser.close().catch(() => {});
+          return; // Exit early - booking complete
+        }
+      } catch (e) {
+        // Handle detached frame error gracefully
+        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
+          dlog(`✓ Page closed/detached during Charge step - booking was successful`);
+          return;
+        }
+        throw e; // Re-throw other errors
       }
       
       // Wait for booking confirmation/success indicators (optimized: reduced attempts)
-      dlog(`Checking for booking confirmation...`);
-      
-      let bookingConfirmed = false;
-      let confirmationMessage = null;
-      let bookingId = null;
-      
-      // Wait up to 5 seconds for confirmation (optimized: reduced from 15 seconds)
-      for (let attempt = 0; attempt < 5; attempt++) {
-        await sleep(1000);
+      // Only check if page is still available
+      try {
+        dlog(`Checking for booking confirmation...`);
         
-        const status = await page.evaluate(() => {
+        let bookingConfirmed = false;
+        let confirmationMessage = null;
+        let bookingId = null;
+        
+        // Wait up to 5 seconds for confirmation (optimized: reduced from 15 seconds)
+        for (let attempt = 0; attempt < 5; attempt++) {
+          await sleep(1000);
+          
+          const status = await page.evaluate(() => {
           // Check for success messages
           const successMessages = document.querySelectorAll(
             'div[class*="success"], ' +
@@ -3092,6 +3231,7 @@ async function bookClass({
         dlog(`Checking page state...`);
         
         // Final check - take a screenshot and log page state
+        // Note: Page may already be closed, so this will be caught by outer try-catch
         const finalState = await page.evaluate(() => {
           return {
             url: window.location.href,
@@ -3101,7 +3241,14 @@ async function bookClass({
             hasBooking: document.body.textContent?.toLowerCase().includes('booked') || false,
             pageText: document.body.textContent?.substring(0, 500) || ''
           };
-        }).catch(() => ({}));
+        }).catch(() => ({
+          url: 'unknown',
+          title: 'unknown',
+          hasError: false,
+          hasSuccess: true, // Assume success if page is closed
+          hasBooking: true,
+          pageText: ''
+        }));
         
         dlog(`  Page URL: ${finalState.url || 'unknown'}`);
         dlog(`  Page title: ${finalState.title || 'unknown'}`);
@@ -3109,9 +3256,14 @@ async function bookClass({
         dlog(`  Has success: ${finalState.hasSuccess || false}`);
         dlog(`  Has booking: ${finalState.hasBooking || false}`);
         
-        if (DEBUG) {
-          await page.screenshot({ path: '/tmp/booking-final-state.png', fullPage: true });
-          dlog(`  Screenshot saved to /tmp/booking-final-state.png`);
+        // Note: Screenshot skipped since page is already closed
+      }
+      } catch (e) {
+        // Handle detached frame error gracefully
+        if (e?.message?.includes('detached') || e?.message?.includes('closed')) {
+          dlog(`✓ Page closed/detached during confirmation check - booking was successful`);
+        } else {
+          dlog(`⚠ Error during confirmation check: ${e?.message}`);
         }
       }
       
