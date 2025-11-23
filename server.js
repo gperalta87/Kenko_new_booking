@@ -1495,66 +1495,102 @@ async function bookClass({
       dlog(`Step 1: Switching to Day view...`);
       await takeScreenshot('before-switching-to-day-view');
       
-      // Click the view dropdown and select "Day"
-      const dayViewSelected = await page.evaluate(() => {
-        // Find the dropdown that shows "Week" or current view
-        const dropdownLabel = document.querySelector('#pr_id_2_label, span.p-dropdown-label');
-        if (dropdownLabel && dropdownLabel.textContent?.trim() !== 'Day') {
-          console.log('[BROWSER] Current view is not Day, switching to Day view...');
-          
-          // Click the dropdown to open it
-          const dropdownTrigger = dropdownLabel.closest('div.p-dropdown-trigger') || dropdownLabel.closest('p-dropdown');
-          if (dropdownTrigger) {
-            dropdownTrigger.click();
-            return { success: true, action: 'opened_dropdown' };
-          }
-        } else if (dropdownLabel && dropdownLabel.textContent?.trim() === 'Day') {
-          console.log('[BROWSER] Already in Day view');
-          return { success: true, action: 'already_day_view' };
-        }
-        return { success: false, reason: 'dropdown_not_found' };
-      }).catch(() => ({ success: false, reason: 'error' }));
+      // Click the "Week" dropdown button to open it
+      dlog(`Clicking Week dropdown to switch to Day view...`);
+      const dropdownClicked = await clickElement(page, [
+        '#pr_id_2_label',
+        'span.p-dropdown-label',
+        'p-dropdown.ng-tns-c40-1 div.p-dropdown-trigger',
+        'p-dropdown div.p-dropdown-trigger',
+        'p-dropdown button'
+      ], { offset: { x: 7.174224853515625, y: 19.100000381469727 }, debug: DEBUG });
       
-      if (dayViewSelected.success && dayViewSelected.action === 'opened_dropdown') {
-        dlog(`✓ Opened view dropdown, selecting Day...`);
+      if (dropdownClicked) {
+        dlog(`✓ Opened view dropdown, waiting for menu...`);
         await sleep(800); // Wait for dropdown to open
         
-        // Click the "Day" option
-        const dayOptionClicked = await page.evaluate(() => {
-          // Find the Day option in the dropdown
-          const dayOption = Array.from(document.querySelectorAll('p-dropdownitem span, li span, [role="option"] span')).find(
-            el => el.offsetParent !== null && el.textContent?.trim() === 'Day'
-          );
+        // Wait for dropdown menu to appear
+        let dropdownReady = false;
+        for (let attempt = 0; attempt < 10; attempt++) {
+          dropdownReady = await page.evaluate(() => {
+            const selectors = ['#pr_id_2_list', '[role="listbox"]', 'p-dropdownitem'];
+            for (const sel of selectors) {
+              const el = document.querySelector(sel);
+              if (el && el.offsetParent !== null) return true;
+            }
+            return false;
+          }).catch(() => false);
           
-          if (dayOption) {
-            console.log('[BROWSER] Found Day option, clicking...');
-            dayOption.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            dayOption.click();
-            return { success: true };
+          if (dropdownReady) {
+            dlog(`✓ Dropdown menu appeared (attempt ${attempt + 1})`);
+            break;
           }
-          return { success: false, reason: 'day_option_not_found' };
-        }).catch(() => ({ success: false, reason: 'error' }));
+          
+          if (attempt < 9) {
+            await sleep(300);
+          }
+        }
         
-        if (dayOptionClicked.success) {
-          dlog(`✓ Selected Day view`);
-          await sleep(2000); // Wait for calendar to switch to Day view
+        if (dropdownReady) {
+          // Click the "Day" option
+          dlog(`Clicking Day option in dropdown...`);
+          const dayOptionClicked = await clickElement(page, [
+            '#pr_id_2_list p-dropdownitem:nth-of-type(1) span',
+            'p-dropdownitem:nth-of-type(1) span',
+            'p-dropdownitem:first-child span',
+            '[aria-label="Day"]',
+            'li[aria-label="Day"]',
+            'p-dropdownitem span'
+          ], { debug: DEBUG });
+          
+          if (dayOptionClicked) {
+            dlog(`✓ Selected Day view`);
+            await sleep(2000); // Wait for calendar to switch to Day view
+          } else {
+            dlog(`⚠ Could not click Day option, trying keyboard navigation...`);
+            // Try keyboard navigation as fallback
+            try {
+              await page.keyboard.press('ArrowDown');
+              await sleep(300);
+              await page.keyboard.press('Enter');
+              await sleep(2000);
+              dlog(`✓ Used keyboard navigation to select Day`);
+            } catch (e) {
+              dlog(`Keyboard navigation failed: ${e?.message}`);
+            }
+          }
         } else {
-          dlog(`⚠ Could not click Day option: ${dayOptionClicked.reason}, trying keyboard navigation...`);
+          dlog(`⚠ Dropdown menu did not appear, trying keyboard navigation...`);
           // Try keyboard navigation as fallback
           try {
-            await page.keyboard.press('ArrowDown');
-            await sleep(300);
-            await page.keyboard.press('Enter');
-            await sleep(2000);
-            dlog(`✓ Used keyboard navigation to select Day`);
+            const dropdownElement = await page.$('#pr_id_2_label, span.p-dropdown-label').catch(() => null);
+            if (dropdownElement) {
+              await dropdownElement.focus();
+              await sleep(300);
+              await page.keyboard.press('Space');
+              await sleep(500);
+              await page.keyboard.press('ArrowDown');
+              await sleep(300);
+              await page.keyboard.press('Enter');
+              await sleep(2000);
+              dlog(`✓ Used keyboard navigation to select Day`);
+            }
           } catch (e) {
             dlog(`Keyboard navigation failed: ${e?.message}`);
           }
         }
-      } else if (dayViewSelected.success && dayViewSelected.action === 'already_day_view') {
-        dlog(`✓ Already in Day view`);
       } else {
-        dlog(`⚠ Could not switch to Day view: ${dayViewSelected.reason}, continuing anyway...`);
+        dlog(`⚠ Could not click Week dropdown, checking if already in Day view...`);
+        const currentView = await page.evaluate(() => {
+          const label = document.querySelector('#pr_id_2_label, span.p-dropdown-label');
+          return label ? label.textContent?.trim() : null;
+        }).catch(() => null);
+        
+        if (currentView === 'Day') {
+          dlog(`✓ Already in Day view`);
+        } else {
+          dlog(`⚠ Current view: ${currentView}, continuing anyway...`);
+        }
       }
       
       await takeScreenshot('after-switching-to-day-view');
