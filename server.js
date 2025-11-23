@@ -16,8 +16,18 @@ const LOG_FILE = path.join(LOG_DIR, "booking-server.log");
 const logToFile = (message) => {
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${message}\n`;
-  fs.appendFileSync(LOG_FILE, logMessage);
-  console.log(message); // Also log to console
+  console.log(message); // Always log to console first
+  // Try to log to file, but don't crash if it fails
+  try {
+    // Ensure LOG_DIR exists
+    if (!fs.existsSync(LOG_DIR)) {
+      fs.mkdirSync(LOG_DIR, { recursive: true });
+    }
+    fs.appendFileSync(LOG_FILE, logMessage);
+  } catch (err) {
+    // Silently fail - don't crash the server if file logging fails
+    console.error(`Failed to write to log file: ${err.message}`);
+  }
 };
 
 // Constants
@@ -2358,30 +2368,29 @@ app.post("/book", async (req, res) => {
   }
 });
 
-// Error handlers
+// Error handlers - log but allow server to continue
 process.on("unhandledRejection", (e) => {
   console.error("unhandledRejection:", e);
-  // Don't crash on unhandled rejections - log and continue
 });
 
 process.on("uncaughtException", (e) => {
   console.error("uncaughtException:", e);
-  // Log but don't exit - let Railway handle restarts
-  // process.exit(1); // Commented out to prevent healthcheck failures
+  // Log the error but don't exit - Railway will restart if needed
 });
 
-// Start server with error handling
+// Start server
 const port = process.env.PORT || 3000;
 const host = "0.0.0.0";
 
-try {
-  app.listen(port, host, () => {
-    console.log(`🚀 Booking scraper API running on ${host}:${port}`);
-    console.log(`✅ Healthcheck endpoint available at http://${host}:${port}/`);
-  });
-} catch (error) {
-  console.error("Failed to start server:", error);
-  // Don't exit - let Railway handle it
-  // process.exit(1);
-}
+// Start the server
+const server = app.listen(port, host, () => {
+  console.log(`🚀 Booking scraper API running on ${host}:${port}`);
+  console.log(`✅ Healthcheck endpoint available at http://${host}:${port}/`);
+});
+
+// Handle server errors
+server.on('error', (error) => {
+  console.error("Server error:", error);
+  // Log but don't exit - Railway will handle restarts
+});
 
