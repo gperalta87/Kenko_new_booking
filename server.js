@@ -688,8 +688,8 @@ async function bookClass({
           logToFile(`[NETWORK] WARNING: No autocomplete API requests detected - autocomplete may not be triggering`);
         }
         
-        // Remove network listener
-        page.removeListener('request', requestHandler);
+        // Remove network listener (Puppeteer uses off() instead of removeListener())
+        page.off('request', requestHandler);
         
         // Additional wait after completing typing - Railway needs more time for autocomplete
         await sleep(5000); // Increased wait for Railway autocomplete to appear
