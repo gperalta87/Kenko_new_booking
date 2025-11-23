@@ -620,54 +620,29 @@ async function bookClass({
         await page.focus(foundSelector);
         await sleep(200);
         
-        // CRITICAL: Type character by character with proper event triggering
-        // Railway needs slower typing and explicit event dispatching
-        dlog(`Typing "${gymNameLower}" character by character with events...`);
+        // CRITICAL: Type character by character using ONLY keyboard.type() to trigger autocomplete
+        // Railway needs slower, more realistic typing - don't set value directly, let keyboard.type() do it
+        dlog(`Typing "${gymNameLower}" character by character (Railway-optimized, keyboard only)...`);
         
+        // Ensure input is focused and ready
+        await page.focus(foundSelector);
+        await sleep(300);
+        
+        // Type each character slowly using ONLY keyboard.type() - this triggers autocomplete naturally
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
-          const currentValue = gymNameLower.substring(0, i + 1);
           
-          // Type the character with delay
-          await page.keyboard.type(char, { delay: 150 });
+          // Type the character with realistic delay - Railway needs slower typing
+          await page.keyboard.type(char, { delay: 200 }); // Increased delay for Railway
           
-          // Immediately update the input value and trigger all necessary events
-          await page.evaluate((selector, value) => {
-            const input = document.querySelector(selector);
-            if (input) {
-              // Set the value
-              input.value = value;
-              
-              // Trigger all events that autocomplete might be listening to
-              const events = ['input', 'keyup', 'keydown', 'change', 'keypress'];
-              events.forEach(eventType => {
-                const event = new Event(eventType, { 
-                  bubbles: true, 
-                  cancelable: true 
-                });
-                input.dispatchEvent(event);
-              });
-              
-              // Also trigger React/angular change detection
-              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 
-                "value"
-              )?.set;
-              if (nativeInputValueSetter) {
-                nativeInputValueSetter.call(input, value);
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-              }
-            }
-          }, foundSelector, currentValue);
-          
-          // Wait longer between characters for Railway
-          await sleep(400); // Increased delay for Railway
+          // Wait between characters to allow autocomplete to process
+          await sleep(500); // Increased wait for Railway - autocomplete needs time to fetch results
         }
         
-        dlog("✓ Finished typing with event triggering");
+        dlog("✓ Finished typing with keyboard.type() only");
         
-        // Additional wait after completing typing
-        await sleep(1000);
+        // Additional wait after completing typing - Railway needs more time for autocomplete
+        await sleep(3000); // Increased wait for Railway autocomplete to appear
       } else {
         // Fallback: try to use the element directly
         dlog("Using element-based typing as fallback");
@@ -679,54 +654,28 @@ async function bookClass({
         await inputElement.focus();
         await sleep(200);
         
-        // CRITICAL: Type character by character with proper event triggering
-        dlog(`Typing "${gymNameLower}" character by character with events (fallback)...`);
+        // CRITICAL: Type character by character using ONLY keyboard.type() to trigger autocomplete
+        dlog(`Typing "${gymNameLower}" character by character (Railway-optimized, keyboard only, fallback)...`);
         
+        // Ensure input is focused and ready
+        await inputElement.focus();
+        await sleep(300);
+        
+        // Type each character slowly using ONLY keyboard.type() - this triggers autocomplete naturally
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
-          const currentValue = gymNameLower.substring(0, i + 1);
           
-          // Type the character with delay
-          await page.keyboard.type(char, { delay: 150 });
+          // Type the character with realistic delay - Railway needs slower typing
+          await page.keyboard.type(char, { delay: 200 }); // Increased delay for Railway
           
-          // Immediately update the input value and trigger all necessary events
-          await page.evaluate((value) => {
-            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input[placeholder*="Search"], input[placeholder*="search"]'));
-            const input = inputs.find(i => i.offsetParent !== null);
-            if (input) {
-              // Set the value
-              input.value = value;
-              
-              // Trigger all events that autocomplete might be listening to
-              const events = ['input', 'keyup', 'keydown', 'change', 'keypress'];
-              events.forEach(eventType => {
-                const event = new Event(eventType, { 
-                  bubbles: true, 
-                  cancelable: true 
-                });
-                input.dispatchEvent(event);
-              });
-              
-              // Also trigger React/angular change detection
-              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-                window.HTMLInputElement.prototype, 
-                "value"
-              )?.set;
-              if (nativeInputValueSetter) {
-                nativeInputValueSetter.call(input, value);
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-              }
-            }
-          }, currentValue);
-          
-          // Wait longer between characters for Railway
-          await sleep(400); // Increased delay for Railway
+          // Wait between characters to allow autocomplete to process
+          await sleep(500); // Increased wait for Railway - autocomplete needs time to fetch results
         }
         
-        dlog("✓ Finished typing with event triggering (fallback)");
+        dlog("✓ Finished typing with keyboard.type() only (fallback)");
         
-        // Additional wait after completing typing
-        await sleep(1000);
+        // Additional wait after completing typing - Railway needs more time for autocomplete
+        await sleep(3000); // Increased wait for Railway autocomplete to appear
       }
       
       // Verify the input value was set correctly
@@ -752,7 +701,10 @@ async function bookClass({
       
       // Wait for autocomplete/suggestion to appear - longer wait for Railway
       dlog("Waiting for gym suggestion/option to appear after typing");
-      await sleep(5000); // Increased from 2000ms to 5000ms for Railway
+      
+      // Wait for network requests to complete (autocomplete might fetch from server)
+      // Use a simple delay since Puppeteer doesn't have waitForLoadState
+      await sleep(8000); // Increased wait for Railway - autocomplete needs time to fetch from server
       
       // Take screenshot after typing to see if dropdown appears
       await takeScreenshot('gym-after-typing');
@@ -796,11 +748,94 @@ async function bookClass({
       
       dlog(`Page state after typing: ${JSON.stringify(pageState, null, 2)}`);
       
+      // Check if gym suggestion is visible
+      const gymSuggestionCheck = await page.evaluate((gymName) => {
+        // Look for any visible element containing the gym name
+        const allElements = Array.from(document.querySelectorAll('*'));
+        const gymElements = allElements.filter(el => {
+          if (el.offsetParent === null) return false;
+          const text = (el.textContent || '').trim().toLowerCase();
+          return text.includes(gymName.toLowerCase());
+        });
+        
+        // Get input position
+        const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+        const activeInput = inputs.find(i => i.offsetParent !== null && i.value);
+        let inputRect = null;
+        if (activeInput) {
+          inputRect = activeInput.getBoundingClientRect();
+        }
+        
+        // Check for elements below input that contain gym name
+        const suggestionsBelow = gymElements.filter(el => {
+          if (!inputRect) return false;
+          const elRect = el.getBoundingClientRect();
+          return elRect.top > inputRect.bottom && 
+                 Math.abs(elRect.left - inputRect.left) < 100 &&
+                 elRect.width > 50;
+        });
+        
+        return {
+          gymNameFound: gymElements.length > 0,
+          gymElementCount: gymElements.length,
+          suggestionsBelowInput: suggestionsBelow.length,
+          inputPosition: inputRect ? { top: inputRect.top, bottom: inputRect.bottom, left: inputRect.left, width: inputRect.width } : null,
+          suggestionPositions: suggestionsBelow.map(el => {
+            const rect = el.getBoundingClientRect();
+            return { top: rect.top, bottom: rect.bottom, left: rect.left, width: rect.width, text: (el.textContent || '').substring(0, 30) };
+          })
+        };
+      }, gymName).catch(() => ({ gymNameFound: false, gymElementCount: 0, suggestionsBelowInput: 0 }));
+      
+      logToFile(`[GYM SELECTION] Gym suggestion check: Found=${gymSuggestionCheck.gymNameFound}, Count=${gymSuggestionCheck.gymElementCount}, Below input=${gymSuggestionCheck.suggestionsBelowInput}`);
+      logToFile(`[GYM SELECTION] Input position: ${JSON.stringify(gymSuggestionCheck.inputPosition)}`);
+      if (gymSuggestionCheck.suggestionPositions && gymSuggestionCheck.suggestionPositions.length > 0) {
+        logToFile(`[GYM SELECTION] Suggestion positions: ${JSON.stringify(gymSuggestionCheck.suggestionPositions)}`);
+      }
+      dlog(`Gym suggestion check: ${JSON.stringify(gymSuggestionCheck, null, 2)}`);
+      
       // IMPORTANT: Do NOT press Enter - it will exit the text box. Click directly below the input.
       // Using the proven working method: Puppeteer mouse click at coordinates below input
       logToFile("[GYM SELECTION] Clicking suggestion box below input field using Puppeteer mouse click...");
       dlog("[GYM SELECTION] Clicking suggestion box below input field using Puppeteer mouse click...");
       const clicksBeforeGym = clickCounter;
+      
+      // Wait for suggestion to appear - check multiple times for Railway
+      let suggestionVisible = false;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const checkResult = await page.evaluate((gymName) => {
+          const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"]'));
+          const activeInput = inputs.find(i => i.offsetParent !== null && i.value);
+          if (!activeInput) return { visible: false };
+          
+          const inputRect = activeInput.getBoundingClientRect();
+          const allElements = Array.from(document.querySelectorAll('*'));
+          const suggestions = allElements.filter(el => {
+            if (el.offsetParent === null) return false;
+            const text = (el.textContent || '').trim().toLowerCase();
+            const elRect = el.getBoundingClientRect();
+            return text.includes(gymName.toLowerCase()) &&
+                   elRect.top > inputRect.bottom &&
+                   Math.abs(elRect.left - inputRect.left) < 100 &&
+                   elRect.width > 50;
+          });
+          
+          return { visible: suggestions.length > 0, count: suggestions.length };
+        }, gymName).catch(() => ({ visible: false, count: 0 }));
+        
+        if (checkResult.visible) {
+          suggestionVisible = true;
+          logToFile(`[GYM SELECTION] Suggestion is visible (attempt ${attempt + 1})`);
+          break;
+        }
+        
+        logToFile(`[GYM SELECTION] Suggestion not yet visible (attempt ${attempt + 1}/5), waiting...`);
+        await sleep(1000);
+      }
+      
+      if (!suggestionVisible) {
+        logToFile(`[GYM SELECTION] WARNING: Suggestion not visible after waiting, proceeding anyway`);
+      }
       
       try {
         const inputElement = await page.$(foundSelector || 'input[type="text"]');
