@@ -538,49 +538,152 @@ async function bookClass({
       const gymNameLower = gymName.toLowerCase();
       dlog(`Typing gym name character by character: ${gymNameLower}`);
       
-      // Type each character individually with visible delay - one letter at a time
+      // Type each character individually with proper event triggering for autocomplete
+      // Railway needs slower typing and explicit event dispatching to trigger autocomplete
       if (foundSelector) {
         dlog(`Using found selector for typing: ${foundSelector}`);
         // Clear any existing text first
         await page.click(foundSelector, { clickCount: 3 }); // Triple click to select all
         await page.keyboard.press('Backspace');
+        await sleep(200);
         
         // Focus the input
         await page.focus(foundSelector);
+        await sleep(200);
         
-        // Type each character ONE AT A TIME with visible delay
-        // This ensures you see each letter appear individually
+        // CRITICAL: Type character by character with proper event triggering
+        // Railway needs slower typing and explicit event dispatching
+        dlog(`Typing "${gymNameLower}" character by character with events...`);
+        
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
-          // Type one character and wait so you can see it appear
-          await page.keyboard.type(char);
-          // Wait between each character to make typing visible
-          await sleep(150); // 150ms delay makes it clearly visible letter by letter
+          const currentValue = gymNameLower.substring(0, i + 1);
+          
+          // Type the character with delay
+          await page.keyboard.type(char, { delay: 150 });
+          
+          // Immediately update the input value and trigger all necessary events
+          await page.evaluate((selector, value) => {
+            const input = document.querySelector(selector);
+            if (input) {
+              // Set the value
+              input.value = value;
+              
+              // Trigger all events that autocomplete might be listening to
+              const events = ['input', 'keyup', 'keydown', 'change', 'keypress'];
+              events.forEach(eventType => {
+                const event = new Event(eventType, { 
+                  bubbles: true, 
+                  cancelable: true 
+                });
+                input.dispatchEvent(event);
+              });
+              
+              // Also trigger React/angular change detection
+              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 
+                "value"
+              )?.set;
+              if (nativeInputValueSetter) {
+                nativeInputValueSetter.call(input, value);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+            }
+          }, foundSelector, currentValue);
+          
+          // Wait longer between characters for Railway
+          await sleep(400); // Increased delay for Railway
         }
-        dlog("Successfully typed gym name character by character (visible)");
+        
+        dlog("✓ Finished typing with event triggering");
+        
+        // Additional wait after completing typing
+        await sleep(1000);
       } else {
         // Fallback: try to use the element directly
         dlog("Using element-based typing as fallback");
         await inputElement.click({ clickCount: 3 }); // Triple click to select all
         await page.keyboard.press('Backspace');
+        await sleep(200);
         
         // Focus the input
         await inputElement.focus();
+        await sleep(200);
         
-        // Type each character ONE AT A TIME with visible delay
+        // CRITICAL: Type character by character with proper event triggering
+        dlog(`Typing "${gymNameLower}" character by character with events (fallback)...`);
+        
         for (let i = 0; i < gymNameLower.length; i++) {
           const char = gymNameLower[i];
-          // Type one character and wait so you can see it appear
-          await page.keyboard.type(char);
-          // Wait between each character to make typing visible
-          await sleep(150); // 150ms delay makes it clearly visible letter by letter
+          const currentValue = gymNameLower.substring(0, i + 1);
+          
+          // Type the character with delay
+          await page.keyboard.type(char, { delay: 150 });
+          
+          // Immediately update the input value and trigger all necessary events
+          await page.evaluate((value) => {
+            const inputs = Array.from(document.querySelectorAll('input[type="text"], input[type="search"], input[placeholder*="Search"], input[placeholder*="search"]'));
+            const input = inputs.find(i => i.offsetParent !== null);
+            if (input) {
+              // Set the value
+              input.value = value;
+              
+              // Trigger all events that autocomplete might be listening to
+              const events = ['input', 'keyup', 'keydown', 'change', 'keypress'];
+              events.forEach(eventType => {
+                const event = new Event(eventType, { 
+                  bubbles: true, 
+                  cancelable: true 
+                });
+                input.dispatchEvent(event);
+              });
+              
+              // Also trigger React/angular change detection
+              const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+                window.HTMLInputElement.prototype, 
+                "value"
+              )?.set;
+              if (nativeInputValueSetter) {
+                nativeInputValueSetter.call(input, value);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+              }
+            }
+          }, currentValue);
+          
+          // Wait longer between characters for Railway
+          await sleep(400); // Increased delay for Railway
         }
-        dlog("Successfully typed gym name character by character (visible)");
+        
+        dlog("✓ Finished typing with event triggering (fallback)");
+        
+        // Additional wait after completing typing
+        await sleep(1000);
       }
       
-      // Wait for autocomplete/suggestion to appear - increase wait for production
+      // Verify the input value was set correctly
+      const inputValue = await page.evaluate((selector) => {
+        const input = document.querySelector(selector);
+        return input ? input.value : '';
+      }, foundSelector || 'input[type="text"]').catch(() => '');
+      
+      dlog(`Input value after typing: "${inputValue}"`);
+      if (inputValue !== gymNameLower) {
+        dlog(`⚠ WARNING: Input value mismatch! Expected: "${gymNameLower}", Got: "${inputValue}"`);
+        // Try to set it directly as fallback
+        await page.evaluate((selector, value) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            input.value = value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+        }, foundSelector || 'input[type="text"]', gymNameLower);
+        await sleep(2000);
+      }
+      
+      // Wait for autocomplete/suggestion to appear - longer wait for Railway
       dlog("Waiting for gym suggestion/option to appear after typing");
-      await sleep(2000); // Increased wait for autocomplete to appear
+      await sleep(5000); // Increased from 2000ms to 5000ms for Railway
       
       // Take screenshot after typing to see if dropdown appears
       await takeScreenshot('gym-after-typing');
