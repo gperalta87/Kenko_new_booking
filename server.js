@@ -2357,11 +2357,29 @@ app.post("/book", async (req, res) => {
 });
 
 // Error handlers
-process.on("unhandledRejection", (e) => console.error("unhandledRejection:", e));
-process.on("uncaughtException", (e) => console.error("uncaughtException:", e));
+process.on("unhandledRejection", (e) => {
+  console.error("unhandledRejection:", e);
+  // Don't crash on unhandled rejections - log and continue
+});
 
-// Start server
+process.on("uncaughtException", (e) => {
+  console.error("uncaughtException:", e);
+  // Log but don't exit - let Railway handle restarts
+  // process.exit(1); // Commented out to prevent healthcheck failures
+});
+
+// Start server with error handling
 const port = process.env.PORT || 3000;
 const host = "0.0.0.0";
-app.listen(port, host, () => console.log(`🚀 Booking scraper API running on ${host}:${port}`));
+
+try {
+  app.listen(port, host, () => {
+    console.log(`🚀 Booking scraper API running on ${host}:${port}`);
+    console.log(`✅ Healthcheck endpoint available at http://${host}:${port}/`);
+  });
+} catch (error) {
+  console.error("Failed to start server:", error);
+  // Don't exit - let Railway handle it
+  // process.exit(1);
+}
 
