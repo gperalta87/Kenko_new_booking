@@ -2945,23 +2945,44 @@ async function bookClass({
       // Take screenshot before selecting customer
       await takeScreenshot('before-customer-selection');
       
-      // First, verify autocomplete dropdown is visible
+      // Wait a bit for dropdown to fully populate
+      await sleep(1000);
+      
+      // First, verify autocomplete dropdown is visible and find clickable customer options
       const dropdownCheck = await page.evaluate(() => {
-        // Look for customer options in dropdown
-        const allDivs = Array.from(document.querySelectorAll('div'));
+        // Look for customer options in dropdown - need to find actual clickable elements
+        const allElements = Array.from(document.querySelectorAll('div, li, span, p'));
         const customerOptions = [];
         
-        for (const div of allDivs) {
-          if (div.offsetParent === null) continue;
-          const text = (div.textContent || '').toLowerCase();
+        for (const el of allElements) {
+          if (el.offsetParent === null) continue;
+          const text = (el.textContent || '').trim().toLowerCase();
+          
+          // Look for "Fitpass" with "One" or "Nadia" - these are the actual customer names
           if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
-            const rect = div.getBoundingClientRect();
-            customerOptions.push({
-              text: div.textContent,
-              x: rect.left + rect.width / 2,
-              y: rect.top + rect.height / 2,
-              visible: true
-            });
+            // Check if this is a clickable option (has cursor-pointer or is in a dropdown item)
+            const isClickable = el.classList.contains('cursor-pointer') || 
+                               el.closest('[class*="dropdown"]') !== null ||
+                               el.closest('[class*="option"]') !== null ||
+                               el.closest('[class*="item"]') !== null ||
+                               el.onclick !== null ||
+                               el.getAttribute('role') === 'option';
+            
+            if (isClickable || el.tagName === 'LI' || el.tagName === 'DIV') {
+              const rect = el.getBoundingClientRect();
+              // Make sure it's actually visible and has reasonable size
+              if (rect.width > 50 && rect.height > 20) {
+                customerOptions.push({
+                  text: el.textContent.trim(),
+                  x: rect.left + rect.width / 2,
+                  y: rect.top + rect.height / 2,
+                  visible: true,
+                  tagName: el.tagName,
+                  className: el.className,
+                  isClickable: isClickable
+                });
+              }
+            }
           }
         }
         
@@ -2975,61 +2996,99 @@ async function bookClass({
       if (!dropdownCheck.found) {
         logToFile(`❌ ERROR: Customer dropdown options not found! Cannot select customer.`);
         dlog(`❌ ERROR: Customer dropdown options not found! Cannot select customer.`);
+        
+        // Take screenshot for debugging
+        await takeScreenshot('customer-dropdown-not-found');
+        
         throw new Error(`Customer dropdown not visible - cannot select customer. Autocomplete may not have appeared.`);
       }
       
       dlog(`✓ Found ${dropdownCheck.count} customer option(s) in dropdown`);
       logToFile(`[CUSTOMER SELECTION] Found ${dropdownCheck.count} customer option(s) in dropdown`);
       
-      // Try multiple methods to click the customer
+      // Log the options we found
+      dropdownCheck.options.forEach((opt, i) => {
+        logToFile(`  Option ${i + 1}: "${opt.text}" at (${opt.x}, ${opt.y}), tag: ${opt.tagName}, clickable: ${opt.isClickable}`);
+      });
+      
+      // Try multiple methods to click the customer - prioritize clickable elements
       let customerSelected = false;
       
-      // Method 1: Try using clickElement with text selector
-      try {
-        dlog(`[CUSTOMER SELECTION] Method 1: Trying text-based selector...`);
-        await clickElement(page, [
-          `::-p-text(${CUSTOMER_NAME})`,
-          `::-p-text(Fitpass)`,
-          'div.search-container > div > div',
-          '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div)',
-          ':scope >>> div.search-container > div > div'
-        ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
-        customerSelected = true;
-        dlog(`✓ Customer selected using Method 1`);
-      } catch (e) {
-        dlog(`Method 1 failed: ${e?.message}`);
+      // Method 1: Try clicking the first clickable option by coordinates (most reliable)
+      if (dropdownCheck.options.length > 0) {
+        try {
+          // Prefer clickable options, but use any if none are marked as clickable
+          const optionToClick = dropdownCheck.options.find(opt => opt.isClickable) || dropdownCheck.options[0];
+          
+          dlog(`[CUSTOMER SELECTION] Method 1: Clicking customer option by coordinates: "${optionToClick.text}" at (${optionToClick.x}, ${optionToClick.y})`);
+          logToFile(`[CUSTOMER SELECTION] Method 1: Clicking "${optionToClick.text}" at (${optionToClick.x}, ${optionToClick.y})`);
+          
+          await page.mouse.click(optionToClick.x, optionToClick.y);
+          logClick('Select customer', `mouse.click(${optionToClick.x}, ${optionToClick.y})`, 'Puppeteer.mouse.click(coordinates)');
+          
+          // Wait for selection to register
+          await sleep(500);
+          
+          // Verify the click worked
+          const clickVerified = await page.evaluate(() => {
+            // Check if dropdown closed and customer name appears in a selected state
+            const inputs = Array.from(document.querySelectorAll('input'));
+            for (const input of inputs) {
+              if (input.offsetParent === null) continue;
+              const value = (input.value || '').trim().toLowerCase();
+              // If value contains "fitpass" and is more than just "fitpass" (should have "one" or "nadia")
+              if (value.includes('fitpass') && value.length > 7) {
+                return true;
+              }
+            }
+            return false;
+          }).catch(() => false);
+          
+          if (clickVerified) {
+            customerSelected = true;
+            dlog(`✓ Customer selected using Method 1 (coordinates)`);
+          } else {
+            dlog(`⚠ Method 1 click may not have registered, trying other methods...`);
+          }
+        } catch (e) {
+          dlog(`Method 1 failed: ${e?.message}`);
+        }
       }
       
-      // Method 2: Try clicking by coordinates if we found options
-      if (!customerSelected && dropdownCheck.options.length > 0) {
+      // Method 2: Try using clickElement with text selector (fallback)
+      if (!customerSelected) {
         try {
-          dlog(`[CUSTOMER SELECTION] Method 2: Trying coordinate-based click...`);
-          const firstOption = dropdownCheck.options[0];
-          await page.mouse.click(firstOption.x, firstOption.y);
-          logClick('Select customer', `mouse.click(${firstOption.x}, ${firstOption.y})`, 'Puppeteer.mouse.click()');
+          dlog(`[CUSTOMER SELECTION] Method 2: Trying text-based selector...`);
+          await clickElement(page, [
+            `::-p-text(Fitpass One)`,
+            `::-p-text(Fitpass)`,
+            'div.search-container > div > div',
+            ':scope >>> div.search-container > div > div'
+          ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
           customerSelected = true;
-          dlog(`✓ Customer selected using Method 2 (coordinates)`);
+          dlog(`✓ Customer selected using Method 2`);
         } catch (e) {
           dlog(`Method 2 failed: ${e?.message}`);
         }
       }
       
-      // Method 3: Try direct element click via page.evaluate
+      // Method 3: Try direct element click via page.evaluate (last resort)
       if (!customerSelected) {
         try {
           dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click...`);
-          const clicked = await page.evaluate((customerName) => {
-            const allDivs = Array.from(document.querySelectorAll('div'));
+          const clicked = await page.evaluate(() => {
+            const allDivs = Array.from(document.querySelectorAll('div, li'));
             for (const div of allDivs) {
               if (div.offsetParent === null) continue;
-              const text = (div.textContent || '').toLowerCase();
+              const text = (div.textContent || '').trim().toLowerCase();
               if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
+                // Try to click the element
                 div.click();
                 return true;
               }
             }
             return false;
-          }, CUSTOMER_NAME).catch(() => false);
+          }).catch(() => false);
           
           if (clicked) {
             customerSelected = true;
@@ -3043,6 +3102,7 @@ async function bookClass({
       
       if (!customerSelected) {
         logToFile(`❌ ERROR: Failed to select customer using all methods!`);
+        await takeScreenshot('customer-selection-failed');
         throw new Error(`Failed to select customer - all click methods failed`);
       }
       
@@ -3052,37 +3112,61 @@ async function bookClass({
       // Take screenshot immediately after clicking customer
       await takeScreenshot('after-customer-click-attempt');
       
-      // STRICT VALIDATION: Verify customer was actually selected
-      // Check multiple indicators that customer was selected
-      const customerSelectedCheck = await page.evaluate((customerName) => {
+      // STRICT VALIDATION: Verify customer was actually SELECTED (not just typed)
+      // Check multiple indicators that customer was selected from dropdown
+      const customerSelectedCheck = await page.evaluate(() => {
         const results = {
           customerInInput: false,
+          customerInputValue: null,
           customerNameVisible: false,
           bookButtonVisible: false,
           dropdownClosed: false,
+          customerSelectedIndicator: false, // NEW: Check if customer was actually selected vs just typed
           customerText: null,
           bookButtonText: null
         };
         
-        // Check 1: Customer name appears in input field (dropdown should be closed)
+        // Check 1: Customer name appears in input field
         const inputs = Array.from(document.querySelectorAll('input'));
         for (const input of inputs) {
           if (input.offsetParent === null) continue;
-          const value = (input.value || '').toLowerCase();
-          if (value.includes('fitpass')) {
+          const value = (input.value || '').trim();
+          if (value.toLowerCase().includes('fitpass')) {
             results.customerInInput = true;
-            results.customerText = input.value;
+            results.customerInputValue = value;
+            results.customerText = value;
+            
+            // CRITICAL: Check if the input value contains the full customer name (not just "fitpass")
+            // If it contains "fitpass one" or "fitpass nadia", it was likely selected
+            // If it's just "fitpass", it was likely just typed
+            const valueLower = value.toLowerCase();
+            if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+              results.customerSelectedIndicator = true; // Full customer name suggests selection
+            }
             break;
           }
         }
         
-        // Check 2: Customer name is visible somewhere in the selected area
-        const allText = (document.body.textContent || '').toLowerCase();
-        if (allText.includes('fitpass') && (allText.includes('one') || allText.includes('nadia'))) {
-          results.customerNameVisible = true;
+        // Check 2: Look for customer name in a selected/displayed state (not just in input)
+        // Check for elements that show the selected customer (usually a div or span near the input)
+        const allElements = Array.from(document.querySelectorAll('div, span, p, li'));
+        for (const el of allElements) {
+          if (el.offsetParent === null) continue;
+          const text = (el.textContent || '').trim().toLowerCase();
+          // Look for full customer name (not just "fitpass")
+          if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
+            // Check if this element is showing a selected customer (not in dropdown)
+            const isSelectedDisplay = !el.closest('[class*="dropdown"]') && 
+                                     !el.closest('[class*="autocomplete"]') &&
+                                     !el.closest('[class*="suggestion"]');
+            if (isSelectedDisplay) {
+              results.customerNameVisible = true;
+              results.customerSelectedIndicator = true; // Found selected customer display
+            }
+          }
         }
         
-        // Check 3: "BOOK USING CREDITS" button appeared (indicates customer selected)
+        // Check 3: "BOOK USING CREDITS" button appeared (strongest indicator - customer was selected)
         const bookButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
           if (btn.offsetParent === null) return false;
           const text = (btn.textContent || '').trim().toLowerCase();
@@ -3092,53 +3176,67 @@ async function bookClass({
         if (bookButton) {
           results.bookButtonVisible = true;
           results.bookButtonText = bookButton.textContent;
+          results.customerSelectedIndicator = true; // BOOK button = customer definitely selected
         }
         
         // Check 4: Dropdown is closed (autocomplete dropdown should disappear after selection)
         const dropdowns = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"]'));
-        const visibleDropdowns = dropdowns.filter(d => d.offsetParent !== null && (d.textContent || '').toLowerCase().includes('fitpass'));
+        const visibleDropdowns = dropdowns.filter(d => {
+          if (d.offsetParent === null) return false;
+          const text = (d.textContent || '').toLowerCase();
+          return text.includes('fitpass');
+        });
         results.dropdownClosed = visibleDropdowns.length === 0;
         
         return results;
-      }, CUSTOMER_NAME).catch(() => ({
+      }).catch(() => ({
         customerInInput: false,
+        customerInputValue: null,
         customerNameVisible: false,
         bookButtonVisible: false,
         dropdownClosed: false,
+        customerSelectedIndicator: false,
         customerText: null,
         bookButtonText: null
       }));
       
       // Log validation results
       logToFile(`[CUSTOMER SELECTION VALIDATION]`);
-      logToFile(`  Customer in input: ${customerSelectedCheck.customerInInput} (${customerSelectedCheck.customerText || 'N/A'})`);
+      logToFile(`  Customer in input: ${customerSelectedCheck.customerInInput} (value: "${customerSelectedCheck.customerInputValue || 'N/A'}")`);
       logToFile(`  Customer name visible: ${customerSelectedCheck.customerNameVisible}`);
       logToFile(`  BOOK USING CREDITS button visible: ${customerSelectedCheck.bookButtonVisible} (${customerSelectedCheck.bookButtonText || 'N/A'})`);
       logToFile(`  Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
+      logToFile(`  Customer selected indicator: ${customerSelectedCheck.customerSelectedIndicator}`);
       
       dlog(`[CUSTOMER SELECTION VALIDATION]`);
-      dlog(`  Customer in input: ${customerSelectedCheck.customerInInput}`);
+      dlog(`  Customer in input: ${customerSelectedCheck.customerInInput} (value: "${customerSelectedCheck.customerInputValue || 'N/A'}")`);
       dlog(`  Customer name visible: ${customerSelectedCheck.customerNameVisible}`);
       dlog(`  BOOK USING CREDITS button visible: ${customerSelectedCheck.bookButtonVisible}`);
       dlog(`  Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
+      dlog(`  Customer selected indicator: ${customerSelectedCheck.customerSelectedIndicator}`);
       
-      // REQUIRE at least one strong indicator that customer was selected
-      const customerDefinitelySelected = customerSelectedCheck.bookButtonVisible || 
-                                         (customerSelectedCheck.customerInInput && customerSelectedCheck.dropdownClosed);
+      // STRICT REQUIREMENT: Customer must be actually SELECTED, not just typed
+      // The customerSelectedIndicator should be true if:
+      // 1. BOOK USING CREDITS button is visible (strongest indicator)
+      // 2. OR customer input contains full name (not just "fitpass")
+      // 3. OR customer name is visible in a selected display element
+      const customerDefinitelySelected = customerSelectedCheck.customerSelectedIndicator;
       
       if (!customerDefinitelySelected) {
         logToFile(`❌ ERROR: Customer selection validation FAILED!`);
-        logToFile(`  Required: BOOK USING CREDITS button visible OR (customer in input AND dropdown closed)`);
-        logToFile(`  Actual: bookButtonVisible=${customerSelectedCheck.bookButtonVisible}, customerInInput=${customerSelectedCheck.customerInInput}, dropdownClosed=${customerSelectedCheck.dropdownClosed}`);
+        logToFile(`  Customer was typed but NOT SELECTED from dropdown.`);
+        logToFile(`  Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}"`);
+        logToFile(`  Expected: Full customer name (e.g., "Fitpass One") or BOOK USING CREDITS button visible`);
+        logToFile(`  Actual: customerSelectedIndicator=${customerSelectedCheck.customerSelectedIndicator}`);
         
         // Take screenshot of failure state
         await takeScreenshot('customer-selection-validation-failed');
         
-        throw new Error(`Customer selection validation failed - customer was not properly selected. BOOK USING CREDITS button not found: ${customerSelectedCheck.bookButtonVisible}, Customer in input: ${customerSelectedCheck.customerInInput}, Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
+        throw new Error(`Customer selection validation failed - customer was typed but not selected from dropdown. Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}", BOOK button visible: ${customerSelectedCheck.bookButtonVisible}`);
       }
       
-      logToFile(`✓ Customer selection VALIDATED successfully`);
-      dlog(`✓ Customer selection VALIDATED successfully`);
+      logToFile(`✓ Customer selection VALIDATED successfully - customer was actually selected`);
+      dlog(`✓ Customer selection VALIDATED successfully - customer was actually selected`);
       
       // Take screenshot after successful validation
       await takeScreenshot('after-customer-selection-validated');
