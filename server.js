@@ -299,7 +299,6 @@ async function bookClass({
     "--disable-setuid-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu", // Always disable GPU in containers
-    "--disable-software-rasterizer",
     "--disable-accelerated-2d-canvas",
     "--no-first-run",
     "--disable-web-security",
@@ -352,6 +351,8 @@ async function bookClass({
     // Critical flags for container compatibility - prevent X11 detection
     "--single-process",  // Run in single process mode (helps in containers)
     "--no-zygote",       // Disable zygote process (helps in containers)
+    // Force software rendering to avoid X11/GPU dependencies
+    "--use-gl=swiftshader",  // Use SwiftShader software rendering (no X11 needed)
   ];
 
   // Always add headless flag for production/headless mode
@@ -363,10 +364,10 @@ async function bookClass({
   dlog(`Headless mode: ${headless} (showBrowser: ${showBrowser})`);
   dlog(`Launch args: ${launchArgs.join(' ')}`);
   
-  // Use headless: true for Railway/containers (more reliable), 'new' for local, false for visible browser
+  // Use 'new' headless mode for all environments - it doesn't require X11
+  // The 'new' headless mode is more reliable in containers and doesn't try to detect X11
   let browser;
-  // On Railway/production, use true instead of 'new' for better compatibility
-  const headlessMode = headless ? (isProduction ? true : 'new') : false;
+  const headlessMode = headless ? 'new' : false;
   
   try {
     dlog(`Launching browser with headless=${headlessMode}...`);
