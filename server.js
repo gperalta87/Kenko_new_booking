@@ -1404,34 +1404,61 @@ async function bookClass({
       
       // Wait for navigation to complete
       dlog("Waiting for login navigation...");
-      await navigationPromise;
-      dlog("Login navigation completed");
+      try {
+        await navigationPromise;
+        dlog("Login navigation completed");
+      } catch (e) {
+        dlog(`Navigation error (continuing anyway): ${e?.message}`);
+        // Wait a bit for page to stabilize even if navigation promise failed
+        await sleep(1000);
+      }
+      
+      // Check if page is still valid before continuing
+      try {
+        const pageUrl = page.url();
+        dlog(`Page URL after login: ${pageUrl}`);
+      } catch (e) {
+        dlog(`⚠ Page context may be invalid: ${e?.message}`);
+        // Wait a bit longer and try to recover
+        await sleep(1000);
+      }
       
       // Handle potential password re-entry (as in recorded session)
       await sleep(500); // Optimized: reduced from 1000ms
-      const passwordInput = await page.$('form > div:nth-of-type(2) input');
-      if (passwordInput) {
-        dlog("Password re-entry detected, filling again");
-        await clickElement(page, [
-          'body > div > div > div',
-          '::-p-xpath(/html/body/div/div/div)',
-          ':scope >>> body > div > div > div'
-        ], { offset: { x: 55.5, y: 344.3359375 } });
-        await sleep(300); // Optimized: reduced from 500ms
-        await fillInput(page, [
-          '::-p-aria(Password)',
-          'form > div:nth-of-type(2) input',
-          '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[2]/div[2]/input)',
-          ':scope >>> form > div:nth-of-type(2) input'
-        ], password, { debug: DEBUG });
-        await page.keyboard.down('Enter');
-        await page.keyboard.up('Enter');
-        // Wait for second navigation if needed
-        await page.waitForNavigation({ waitUntil: "networkidle0", timeout: 15000 }).catch(() => {});
+      
+      try {
+        const passwordInput = await page.$('form > div:nth-of-type(2) input').catch(() => null);
+        if (passwordInput) {
+          dlog("Password re-entry detected, filling again");
+          await clickElement(page, [
+            'body > div > div > div',
+            '::-p-xpath(/html/body/div/div/div)',
+            ':scope >>> body > div > div > div'
+          ], { offset: { x: 55.5, y: 344.3359375 } });
+          await sleep(300); // Optimized: reduced from 500ms
+          await fillInput(page, [
+            '::-p-aria(Password)',
+            'form > div:nth-of-type(2) input',
+            '::-p-xpath(/html/body/div/div/div/div[2]/div/form/div[2]/div[2]/input)',
+            ':scope >>> form > div:nth-of-type(2) input'
+          ], password, { debug: DEBUG });
+          await page.keyboard.down('Enter');
+          await page.keyboard.up('Enter');
+          // Wait for second navigation if needed
+          await page.waitForNavigation({ waitUntil: "networkidle0", timeout: 15000 }).catch(() => {});
+        }
+      } catch (e) {
+        dlog(`Error checking for password re-entry (may be normal): ${e?.message}`);
       }
       
-      await sleep(500); // Wait for page to stabilize
-      await takeScreenshot('after-login-submit');
+      await sleep(1000); // Wait for page to stabilize after navigation
+      
+      // Take screenshot with error handling
+      try {
+        await takeScreenshot('after-login-submit');
+      } catch (e) {
+        dlog(`⚠ Could not take screenshot after login: ${e?.message}`);
+      }
     });
 
     // Step 6: Navigate to target month/year, find target date column, then find and click class
