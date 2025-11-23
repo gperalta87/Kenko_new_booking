@@ -2248,12 +2248,200 @@ async function bookClass({
       await sleep(2000);
     });
 
+    // Step 16: Verify booking appears in reservations list
+    let bookingVerified = false;
+    let bookingFoundInReservations = false;
+    let reservationDetails = null;
+    
+    await step("Verify booking in reservations", async () => {
+      dlog(`Verifying booking appears in reservations list...`);
+      
+      try {
+        // Navigate to reservations page
+        // Common URLs: /reservations, /bookings, /appointments, /schedule
+        const possibleUrls = [
+          "https://partners.gokenko.com/reservations",
+          "https://partners.gokenko.com/bookings",
+          "https://partners.gokenko.com/appointments",
+          "https://partners.gokenko.com/schedule",
+          "https://partners.gokenko.com/dashboard/reservations"
+        ];
+        
+        let reservationsPageFound = false;
+        for (const url of possibleUrls) {
+          try {
+            dlog(`Trying to navigate to: ${url}`);
+            await page.goto(url, { waitUntil: 'networkidle2', timeout: 10000 });
+            await sleep(2000);
+            
+            // Check if we're on a valid reservations page
+            const pageTitle = await page.title().catch(() => '');
+            const pageUrl = page.url();
+            dlog(`  Page title: ${pageTitle}`);
+            dlog(`  Current URL: ${pageUrl}`);
+            
+            // Look for reservations/booking indicators
+            const hasReservationsContent = await page.evaluate(() => {
+              const bodyText = document.body.textContent || '';
+              return bodyText.toLowerCase().includes('reservation') ||
+                     bodyText.toLowerCase().includes('booking') ||
+                     bodyText.toLowerCase().includes('appointment') ||
+                     bodyText.toLowerCase().includes('schedule');
+            }).catch(() => false);
+            
+            if (hasReservationsContent || pageUrl.includes('reservation') || pageUrl.includes('booking')) {
+              reservationsPageFound = true;
+              dlog(`✓ Found reservations page at: ${url}`);
+              break;
+            }
+          } catch (e) {
+            dlog(`  Could not access ${url}: ${e?.message}`);
+            continue;
+          }
+        }
+        
+        if (!reservationsPageFound) {
+          dlog(`⚠ Could not find reservations page - trying to navigate from current page`);
+          // Try clicking on a reservations link if we're still logged in
+          try {
+            const reservationLinks = await page.$$('a[href*="reservation"], a[href*="booking"], a[href*="appointment"]');
+            if (reservationLinks.length > 0) {
+              dlog(`Found ${reservationLinks.length} reservation links, clicking first one...`);
+              await reservationLinks[0].click();
+              await sleep(3000);
+              reservationsPageFound = true;
+            }
+          } catch (e) {
+            dlog(`Could not navigate via links: ${e?.message}`);
+          }
+        }
+        
+        if (reservationsPageFound) {
+          // Wait for reservations list to load
+          await sleep(3000);
+          
+          // Search for the booking in the reservations list
+          // Look for the gym name, date, and time
+          const searchDate = new Date(targetDate).toLocaleDateString('en-US', { 
+            month: 'short', 
+            day: 'numeric',
+            year: 'numeric' 
+          });
+          
+          dlog(`Searching for booking with:`);
+          dlog(`  Gym: ${gymName}`);
+          dlog(`  Date: ${targetDate} (formatted: ${searchDate})`);
+          dlog(`  Time: ${targetTime}`);
+          
+          const bookingSearch = await page.evaluate((gymName, targetDate, targetTime, searchDate) => {
+            const bodyText = document.body.textContent || '';
+            const pageHTML = document.body.innerHTML || '';
+            
+            // Check if gym name appears
+            const hasGymName = bodyText.toLowerCase().includes(gymName.toLowerCase());
+            
+            // Check for date (try multiple formats)
+            const dateFormats = [
+              targetDate, // 2025-11-25
+              searchDate, // Nov 25, 2025
+              targetDate.replace(/-/g, '/'), // 2025/11/25
+              targetDate.split('-').reverse().join('/'), // 25/11/2025
+            ];
+            const hasDate = dateFormats.some(date => bodyText.includes(date));
+            
+            // Check for time
+            const hasTime = bodyText.toLowerCase().includes(targetTime.toLowerCase());
+            
+            // Try to find reservation elements
+            const reservationElements = Array.from(document.querySelectorAll(
+              'div[class*="reservation"], ' +
+              'div[class*="booking"], ' +
+              'div[class*="appointment"], ' +
+              'tr[class*="reservation"], ' +
+              'tr[class*="booking"], ' +
+              'li[class*="reservation"], ' +
+              'li[class*="booking"]'
+            ));
+            
+            // Check each reservation element for our booking details
+            let matchingReservation = null;
+            for (const element of reservationElements) {
+              const elementText = element.textContent || '';
+              const hasGym = elementText.toLowerCase().includes(gymName.toLowerCase());
+              const hasDateMatch = dateFormats.some(date => elementText.includes(date));
+              const hasTimeMatch = elementText.toLowerCase().includes(targetTime.toLowerCase());
+              
+              if (hasGym && (hasDateMatch || hasTimeMatch)) {
+                matchingReservation = {
+                  text: elementText.substring(0, 200),
+                  html: element.innerHTML.substring(0, 500)
+                };
+                break;
+              }
+            }
+            
+            return {
+              hasGymName,
+              hasDate,
+              hasTime,
+              hasAllDetails: hasGymName && hasDate && hasTime,
+              matchingReservation: matchingReservation,
+              pageText: bodyText.substring(0, 1000)
+            };
+          }, gymName, targetDate, targetTime, searchDate).catch(() => ({
+            hasGymName: false,
+            hasDate: false,
+            hasTime: false,
+            hasAllDetails: false,
+            matchingReservation: null,
+            pageText: ''
+          }));
+          
+          dlog(`Booking search results:`);
+          dlog(`  Has gym name: ${bookingSearch.hasGymName}`);
+          dlog(`  Has date: ${bookingSearch.hasDate}`);
+          dlog(`  Has time: ${bookingSearch.hasTime}`);
+          dlog(`  Has all details: ${bookingSearch.hasAllDetails}`);
+          
+          if (bookingSearch.matchingReservation) {
+            dlog(`✓ Found matching reservation element!`);
+            dlog(`  Reservation text: ${bookingSearch.matchingReservation.text.substring(0, 150)}`);
+            bookingFoundInReservations = true;
+            reservationDetails = bookingSearch.matchingReservation;
+          } else if (bookingSearch.hasAllDetails) {
+            dlog(`✓ Found all booking details on page (gym, date, time)`);
+            bookingFoundInReservations = true;
+            reservationDetails = { text: bookingSearch.pageText.substring(0, 300) };
+          } else {
+            dlog(`⚠ Booking details not found in reservations list`);
+            dlog(`  Page text preview: ${bookingSearch.pageText.substring(0, 200)}`);
+            
+            if (DEBUG) {
+              await page.screenshot({ path: '/tmp/reservations-page.png', fullPage: true });
+              dlog(`  Screenshot saved to /tmp/reservations-page.png`);
+            }
+          }
+        } else {
+          dlog(`⚠ Could not access reservations page to verify booking`);
+        }
+        
+        bookingVerified = true;
+      } catch (err) {
+        dlog(`⚠ Error verifying booking in reservations: ${err?.message}`);
+        dlog(`  Stack: ${err?.stack}`);
+        // Don't fail the whole booking if verification fails
+      }
+    });
+
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
 
     return {
       ok: true,
       message: `Successfully booked class for ${CUSTOMER_NAME} on ${targetDate} at ${targetTime}`,
+      verified: bookingVerified,
+      foundInReservations: bookingFoundInReservations,
+      ...(reservationDetails ? { reservationDetails } : {}),
       ...(DEBUG && screenshots.length > 0 ? { screenshots } : {})
     };
 
