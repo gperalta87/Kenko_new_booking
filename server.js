@@ -234,6 +234,14 @@ async function bookClass({
   targetTime,
   DEBUG = false
 }) {
+  // IMPORTANT: Clean up environment variables FIRST, before anything else
+  // This prevents Puppeteer from detecting X11/D-Bus on Railway/containers
+  const displayBefore = process.env.DISPLAY || 'not set';
+  delete process.env.DISPLAY;
+  delete process.env.XAUTHORITY;
+  delete process.env.DBUS_SESSION_BUS_ADDRESS;
+  delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
+  
   // Store screenshots for debugging
   const screenshots = [];
   
@@ -245,10 +253,14 @@ async function bookClass({
     }
   };
   
+  dlog(`Environment cleanup: DISPLAY was ${displayBefore}, now deleted`);
+  
   // Allow showing browser window for local testing
   // Set HEADLESS=false or pass DEBUG=true to see the browser
   // For Railway testing, you can also set SHOW_BROWSER=true in environment variables
-  const showBrowser = process.env.SHOW_BROWSER === 'true' || process.env.HEADLESS === 'false' || DEBUG;
+  // IMPORTANT: Always use headless mode in production/Railway (NODE_ENV=production)
+  const isProduction = process.env.NODE_ENV === 'production';
+  const showBrowser = !isProduction && (process.env.SHOW_BROWSER === 'true' || process.env.HEADLESS === 'false' || DEBUG);
   const headless = !showBrowser;
   
   // Determine Chromium executable path
@@ -343,24 +355,30 @@ async function bookClass({
 
   // For headless mode, ensure DISPLAY and D-Bus env vars are properly unset
   // Puppeteer's bundled Chromium works best in headless mode without X11
-  if (headless) {
-    const displayBefore = process.env.DISPLAY || 'not set';
-    dlog(`DISPLAY before cleanup: ${displayBefore}`);
-    
-    // Delete environment variables (not just set to empty) to prevent X11 detection
-    if (process.env.DISPLAY) delete process.env.DISPLAY;
-    if (process.env.XAUTHORITY) delete process.env.XAUTHORITY;
-    if (process.env.DBUS_SESSION_BUS_ADDRESS) delete process.env.DBUS_SESSION_BUS_ADDRESS;
-    if (process.env.DBUS_SYSTEM_BUS_ADDRESS) delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
-    
-    // Also set to empty strings as fallback
-    process.env.DISPLAY = '';
-    process.env.XAUTHORITY = '';
-    process.env.DBUS_SESSION_BUS_ADDRESS = '';
-    process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
-    
-    dlog(`Using true headless mode - DISPLAY and D-Bus vars cleaned (was: ${displayBefore})`);
-  }
+  // Always do this cleanup, especially important for Railway/containerized environments
+  const displayBefore = process.env.DISPLAY || 'not set';
+  dlog(`DISPLAY before cleanup: ${displayBefore}`);
+  
+  // Aggressively delete environment variables to prevent X11 detection
+  // Delete first, then set to empty, then delete again to ensure they're gone
+  if (process.env.DISPLAY) delete process.env.DISPLAY;
+  if (process.env.XAUTHORITY) delete process.env.XAUTHORITY;
+  if (process.env.DBUS_SESSION_BUS_ADDRESS) delete process.env.DBUS_SESSION_BUS_ADDRESS;
+  if (process.env.DBUS_SYSTEM_BUS_ADDRESS) delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
+  
+  // Set to empty strings
+  process.env.DISPLAY = '';
+  process.env.XAUTHORITY = '';
+  process.env.DBUS_SESSION_BUS_ADDRESS = '';
+  process.env.DBUS_SYSTEM_BUS_ADDRESS = '';
+  
+  // Delete again to ensure they're truly gone
+  delete process.env.DISPLAY;
+  delete process.env.XAUTHORITY;
+  delete process.env.DBUS_SESSION_BUS_ADDRESS;
+  delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
+  
+  dlog(`Environment variables cleaned - DISPLAY was: ${displayBefore}, now deleted`);
   
   // Use headless: 'new' mode (most stable) for headless, false for visible browser
   let browser;
