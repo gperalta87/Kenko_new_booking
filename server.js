@@ -1593,6 +1593,54 @@ async function bookClass({
         }
       }
       
+      // Verify we're actually in Day view before proceeding
+      await sleep(1000); // Wait for calendar to stabilize
+      const verifyDayView = await page.evaluate(() => {
+        const label = document.querySelector('#pr_id_2_label, span.p-dropdown-label');
+        const currentView = label ? label.textContent?.trim() : null;
+        // Also check for Day view calendar elements
+        const dayViewElements = document.querySelectorAll('mwl-calendar-day-view, [class*="day-view"], div.cal-day-view');
+        return {
+          currentView: currentView,
+          isDayView: currentView === 'Day',
+          hasDayViewElements: dayViewElements.length > 0
+        };
+      }).catch(() => ({ currentView: null, isDayView: false, hasDayViewElements: false }));
+      
+      if (!verifyDayView.isDayView) {
+        dlog(`⚠ WARNING: Not in Day view! Current view: "${verifyDayView.currentView}". Retrying Day view selection...`);
+        // Retry Day view selection with keyboard navigation
+        try {
+          const dropdownElement = await page.$('#pr_id_2_label, span.p-dropdown-label').catch(() => null);
+          if (dropdownElement) {
+            await dropdownElement.click();
+            await sleep(800);
+            await page.keyboard.press('ArrowDown');
+            await sleep(300);
+            await page.keyboard.press('Enter');
+            await sleep(2000);
+            dlog(`✓ Retried Day view selection with keyboard`);
+          }
+        } catch (e) {
+          dlog(`⚠ Retry failed: ${e?.message}`);
+        }
+        
+        // Verify again
+        const verifyAgain = await page.evaluate(() => {
+          const label = document.querySelector('#pr_id_2_label, span.p-dropdown-label');
+          return label ? label.textContent?.trim() : null;
+        }).catch(() => null);
+        
+        if (verifyAgain !== 'Day') {
+          logToFile(`❌ CRITICAL: Failed to switch to Day view. Current view: "${verifyAgain}". Proceeding anyway but may fail.`);
+          dlog(`❌ CRITICAL: Failed to switch to Day view. Current view: "${verifyAgain}". Proceeding anyway but may fail.`);
+        } else {
+          dlog(`✓ Successfully verified Day view after retry`);
+        }
+      } else {
+        dlog(`✓ Verified: Currently in Day view`);
+      }
+      
       await takeScreenshot('after-switching-to-day-view');
       await sleep(1000); // Wait for calendar to stabilize
       
