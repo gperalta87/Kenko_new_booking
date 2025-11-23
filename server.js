@@ -1740,14 +1740,14 @@ async function bookClass({
         dlog(`✓ Successfully clicked dropdown using method: ${dropdownClicked.method}`);
       }
       
-      // Give the dropdown time to open (optimized: reduced from 1000ms to 300ms)
+      // Give the dropdown time to open (increased for Railway)
       dlog(`Waiting for dropdown menu to open...`);
-      await sleep(300);
+      await sleep(800); // Increased wait time for dropdown to open
       
-      // Wait for dropdown menu to appear - check multiple times (optimized: 5 attempts × 200ms = 1s max)
+      // Wait for dropdown menu to appear - check multiple times (increased attempts for Railway)
       dlog(`Checking if dropdown menu appeared...`);
       let dropdownReady = false;
-      for (let attempt = 0; attempt < 5; attempt++) {
+      for (let attempt = 0; attempt < 10; attempt++) {
         dropdownReady = await page.evaluate(() => {
           // More aggressive search for dropdown with multiple selectors
           const selectors = [
@@ -1773,21 +1773,91 @@ async function bookClass({
           break;
         }
         
-        if (attempt < 4) {
-          dlog(`Waiting for dropdown menu... (attempt ${attempt + 1}/5)`);
-          await sleep(200); // Optimized: reduced from 500ms to 200ms
+        if (attempt < 9) {
+          dlog(`Waiting for dropdown menu... (attempt ${attempt + 1}/10)`);
+          await sleep(300); // Increased wait time for Railway
         }
       }
       
+      // Take screenshot after clicking dropdown to see if it opened
+      await takeScreenshot('after-dropdown-click');
+      
       if (!dropdownReady) {
-        dlog(`⚠ Dropdown menu not found after 5 attempts, but continuing to try clicking Day option...`);
+        dlog(`⚠ Dropdown menu not found after 5 attempts, trying alternative methods...`);
         await takeScreenshot('date-nav-dropdown-not-found');
+        
+        // Try keyboard navigation as fallback
+        dlog(`Trying keyboard navigation to open dropdown...`);
+        try {
+          // Focus the dropdown and press Enter/Arrow Down to open it
+          const dropdownElement = await page.$('p-dropdown.ng-tns-c40-1, p-dropdown');
+          if (dropdownElement) {
+            await dropdownElement.focus();
+            await sleep(200);
+            await page.keyboard.press('ArrowDown');
+            await sleep(300);
+            await page.keyboard.press('Enter');
+            await sleep(500);
+            
+            // Check again if dropdown opened
+            dropdownReady = await page.evaluate(() => {
+              const selectors = ['#pr_id_2_list', '[role="listbox"]', 'p-dropdownitem', '.p-dropdown-panel'];
+              for (const sel of selectors) {
+                const el = document.querySelector(sel);
+                if (el && el.offsetParent !== null) return true;
+              }
+              return false;
+            }).catch(() => false);
+            
+            if (dropdownReady) {
+              dlog(`✓ Dropdown opened using keyboard navigation`);
+            }
+          }
+        } catch (e) {
+          dlog(`Keyboard navigation failed: ${e?.message}`);
+        }
       }
-      await sleep(200); // Optimized: reduced from 500ms to 200ms
+      
+      await sleep(300); // Give dropdown time to fully render
       
       // Step 2: Click "Day" option using page.evaluate (more reliable)
       dlog(`Step 2: Clicking "Day" option...`);
       await takeScreenshot('before-clicking-day-option');
+      
+      // If dropdown still not ready, try keyboard navigation to select Day
+      if (!dropdownReady) {
+        dlog(`Dropdown not visible, trying keyboard navigation to select Day...`);
+        try {
+          // Focus the dropdown first
+          const dropdownElement = await page.$('p-dropdown.ng-tns-c40-1, p-dropdown, #pr_id_2_label');
+          if (dropdownElement) {
+            await dropdownElement.focus();
+            await sleep(200);
+          }
+          
+          // Try pressing ArrowDown then Enter to select first option (Day)
+          await page.keyboard.press('ArrowDown');
+          await sleep(300);
+          await page.keyboard.press('Enter');
+          await sleep(800);
+          
+          // Check if Day view was selected by checking the dropdown label
+          const daySelected = await page.evaluate(() => {
+            const label = document.querySelector('#pr_id_2_label, span.p-dropdown-label');
+            return label && label.textContent?.trim() === 'Day';
+          }).catch(() => false);
+          
+          if (daySelected) {
+            dlog(`✓ Day view selected using keyboard navigation`);
+            await takeScreenshot('after-clicking-day-option');
+            // Skip the rest of the day clicking logic - continue to next step
+          } else {
+            dlog(`⚠ Keyboard navigation did not select Day, trying other methods...`);
+          }
+        } catch (e) {
+          dlog(`Keyboard navigation failed: ${e?.message}`);
+        }
+      }
       
       const dayClicked = await page.evaluate(() => {
         // Method 1: Try ID selector from Puppeteer recording
