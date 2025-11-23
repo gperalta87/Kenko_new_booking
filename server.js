@@ -2305,8 +2305,16 @@ async function bookClass({
 }
 
 // Health check endpoint - must respond quickly for Railway healthcheck
+// This MUST be defined before server.listen() is called
 app.get("/", (_req, res) => {
+  console.log("Healthcheck endpoint hit");
   res.status(200).send("✅ Booking scraper API online");
+});
+
+// Additional healthcheck endpoint for Railway
+app.get("/health", (_req, res) => {
+  console.log("Health endpoint hit");
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 // Booking endpoint
