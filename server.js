@@ -46,9 +46,28 @@ const PLAN_SELECTOR = "div:nth-of-type(32)"; // Fitpass Check-in plan
 // Utilities
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Global click counter for debugging
+let clickCounter = 0;
+const clickLog = [];
+
+// Helper function to log clicks
+const logClick = (location, selector, method) => {
+  clickCounter++;
+  const logEntry = {
+    count: clickCounter,
+    timestamp: new Date().toISOString(),
+    location,
+    selector: selector?.substring(0, 100) || 'unknown',
+    method
+  };
+  clickLog.push(logEntry);
+  const logMessage = `[CLICK #${clickCounter}] ${location} - Method: ${method}, Selector: ${selector?.substring(0, 50) || 'unknown'}`;
+  logToFile(logMessage);
+};
+
 // Helper function to wait for and click an element using Puppeteer
 async function clickElement(page, selectors, options = {}) {
-  const { timeout = TIMEOUT, offset, debug = false } = options;
+  const { timeout = TIMEOUT, offset, debug = false, location = 'unknown' } = options;
   const dlog = (...a) => debug && console.log("[CLICK DEBUG]", ...a);
   
   // Separate selectors into standard CSS and Puppeteer Locator API selectors
@@ -65,7 +84,9 @@ async function clickElement(page, selectors, options = {}) {
   
   // First try standard selectors
   let lastError = null;
+  let clicked = false; // Track if we've already clicked to prevent double-clicks
   for (const selector of validSelectors) {
+    if (clicked) break; // Stop if we already clicked
     try {
       dlog(`Trying standard selector: ${selector}`);
       // Wait for element first
@@ -79,11 +100,13 @@ async function clickElement(page, selectors, options = {}) {
         dlog(`Element found, visible: ${isVisible}`);
         
         if (isVisible) {
+          logClick(location, selector, offset ? `Puppeteer.click(offset)` : `Puppeteer.click()`);
           if (offset) {
             await element.click({ offset });
           } else {
             await element.click();
           }
+          clicked = true; // Mark as clicked
           await sleep(200);
           dlog(`Successfully clicked using selector: ${selector}`);
           return true;
@@ -97,11 +120,14 @@ async function clickElement(page, selectors, options = {}) {
     }
   
   // If standard selectors failed, try Puppeteer Locator API selectors via page.evaluate
-  if (locatorApiSelectors.length > 0) {
+  if (locatorApiSelectors.length > 0 && !clicked) {
     dlog(`Standard selectors failed, trying Puppeteer Locator API selectors via page.evaluate...`);
-    const clicked = await page.evaluate((selectors) => {
-    for (const selector of selectors) {
-      try {
+    const clickedResult = await page.evaluate((selectors, location) => {
+      let clickedOnce = false; // Prevent multiple clicks
+      let clickInfo = null;
+      for (const selector of selectors) {
+        if (clickedOnce) break; // Stop if we already clicked
+        try {
           // Extract text/aria-label from ::-p-aria selector
           if (selector.includes('::-p-aria')) {
             const match = selector.match(/::\-p\-aria\(([^)]+)\)/);
@@ -112,8 +138,35 @@ async function clickElement(page, selectors, options = {}) {
                             Array.from(document.querySelectorAll('*')).find(el => el.textContent?.includes(text));
               if (element && element.offsetParent !== null) {
                 element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                console.log(`[BROWSER CLICK] ${location} - Clicking via ::-p-aria("${text}")`);
                 element.click();
-                return true;
+                clickedOnce = true;
+                clickInfo = { method: 'element.click()', selector: `::-p-aria(${text})` };
+                return { clicked: true, info: clickInfo };
+              }
+            }
+          }
+          
+          // Extract text from ::-p-text selector
+          if (selector.includes('::-p-text')) {
+            const match = selector.match(/::\-p\-text\((.*?)\)/);
+            if (match) {
+              const text = match[1];
+              // Find element containing this exact text
+              const allElements = Array.from(document.querySelectorAll('*'));
+              const element = allElements.find(el => {
+                if (el.offsetParent === null) return false;
+                const elText = (el.textContent || '').trim();
+                return elText === text || elText.includes(text);
+              });
+              if (element && element.offsetParent !== null) {
+                console.log(`[BROWSER CLICK] ${location} - Clicking via ::-p-text("${text}")`);
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Only click once - use element.click() only
+                element.click();
+                clickedOnce = true;
+                clickInfo = { method: 'element.click()', selector: `::-p-text(${text})` };
+                return { clicked: true, info: clickInfo };
               }
             }
           }
@@ -127,22 +180,13 @@ async function clickElement(page, selectors, options = {}) {
                 const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
                 const element = result.singleNodeValue;
                 if (element && element.offsetParent !== null) {
-                  console.log(`[BROWSER] Found element via XPath, clicking...`);
+                  console.log(`[BROWSER CLICK] ${location} - Clicking via XPath`);
                   element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                  
-                  // Try multiple click methods
+                  // Only click once - use element.click() only (removed duplicate mouse events)
                   element.click();
-                  
-                  // Also dispatch mouse events
-                  const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-                  const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
-                  const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-                  
-                  element.dispatchEvent(mouseDown);
-                  element.dispatchEvent(mouseUp);
-                  element.dispatchEvent(clickEvent);
-                  
-                  return true;
+                  clickedOnce = true;
+                  clickInfo = { method: 'element.click()', selector: `::-p-xpath(${xpath.substring(0, 50)})` };
+                  return { clicked: true, info: clickInfo };
                 } else {
                   console.log(`[BROWSER] XPath element found but not visible`);
                 }
@@ -155,8 +199,13 @@ async function clickElement(page, selectors, options = {}) {
           // Continue to next selector
         }
       }
-      return false;
-    }, locatorApiSelectors).catch(() => false);
+      return { clicked: clickedOnce, info: clickInfo };
+    }, locatorApiSelectors, location).catch(() => ({ clicked: false, info: null }));
+    
+    const clicked = clickedResult?.clicked || false;
+    if (clicked && clickedResult?.info) {
+      logClick(location, clickedResult.info.selector, clickedResult.info.method);
+    }
     
     if (clicked) {
       dlog("Successfully clicked using page.evaluate with Locator API selectors");
@@ -259,6 +308,11 @@ async function bookClass({
   delete process.env.XAUTHORITY;
   delete process.env.DBUS_SESSION_BUS_ADDRESS;
   delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
+  
+  // Reset click counter and log for each booking attempt
+  clickCounter = 0;
+  clickLog.length = 0;
+  logToFile(`[BOOKING START] Starting booking process. Click counter reset to 0.`);
   
   // Store screenshots for debugging
   const screenshots = [];
@@ -409,12 +463,27 @@ async function bookClass({
   await sleep(500);
   
   // Helper to take screenshot and store as base64 (must be after page is created)
+  // Always saves screenshots for debugging, not just when DEBUG=true
   const takeScreenshot = async (name) => {
-    if (!DEBUG) return null;
     try {
       const screenshot = await page.screenshot({ encoding: 'base64', fullPage: true });
-      screenshots.push({ name, data: `data:image/png;base64,${screenshot}` });
-      dlog(`Screenshot captured: ${name}`);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `screenshot-${name}-${timestamp}.png`;
+      
+      screenshots.push({ name, data: `data:image/png;base64,${screenshot}`, filename });
+      dlog(`Screenshot captured: ${name} (${filename})`);
+      
+      // Also save to /tmp directory for Railway debugging (accessible via web endpoint)
+      try {
+        const screenshotPath = path.join(LOG_DIR, filename);
+        const screenshotBuffer = Buffer.from(screenshot, 'base64');
+        fs.writeFileSync(screenshotPath, screenshotBuffer);
+        dlog(`Screenshot saved to: ${screenshotPath}`);
+      } catch (fileError) {
+        // Silently fail if we can't write to /tmp (not critical)
+        dlog(`Could not save screenshot to file: ${fileError?.message}`);
+      }
+      
       return screenshot;
     } catch (e) {
       dlog(`Could not take screenshot ${name}: ${e?.message}`);
@@ -727,74 +796,59 @@ async function bookClass({
       
       dlog(`Page state after typing: ${JSON.stringify(pageState, null, 2)}`);
       
-      // Try to find the dropdown option with multiple attempts
-      let gymOptionFound = false;
-      for (let attempt = 0; attempt < 5; attempt++) {
-        if (attempt > 0) {
-          dlog(`Retry attempt ${attempt + 1} to find gym option...`);
-          await sleep(1000);
+      // IMPORTANT: Do NOT press Enter - it will exit the text box. Click directly below the input.
+      // Using the proven working method: Puppeteer mouse click at coordinates below input
+      logToFile("[GYM SELECTION] Clicking suggestion box below input field using Puppeteer mouse click...");
+      dlog("[GYM SELECTION] Clicking suggestion box below input field using Puppeteer mouse click...");
+      const clicksBeforeGym = clickCounter;
+      
+      try {
+        const inputElement = await page.$(foundSelector || 'input[type="text"]');
+        if (!inputElement) {
+          throw new Error('Could not find gym input element');
         }
         
-        // Take screenshot before each attempt
-        if (attempt === 0) {
-          await takeScreenshot(`gym-before-attempt-${attempt + 1}`);
+        const box = await inputElement.boundingBox();
+        if (!box) {
+          throw new Error('Could not get bounding box for gym input element');
         }
         
-        // Check if dropdown is visible
-        const dropdownVisible = await page.evaluate(() => {
-          // Look for common dropdown/autocomplete containers
-          const dropdowns = document.querySelectorAll('[role="listbox"], [role="menu"], [class*="dropdown"], [class*="autocomplete"], [class*="suggestion"], div[class*="radix"]');
-          for (const dropdown of dropdowns) {
-            if (dropdown.offsetParent !== null) {
-              return true;
-            }
-          }
-          return false;
+        // Click directly below the input (suggestion box should be there)
+        const clickX = box.x + box.width / 2;
+        const clickY = box.y + box.height + 30; // 30px below the input
+        logToFile(`[GYM SELECTION] Clicking at coordinates: (${clickX}, ${clickY})`);
+        dlog(`[GYM SELECTION] Clicking at coordinates: (${clickX}, ${clickY})`);
+        logClick('Gym selection', `mouse.click(${clickX}, ${clickY})`, 'Puppeteer.mouse.click()');
+        await page.mouse.click(clickX, clickY);
+        await sleep(2000);
+        
+        // Verify we moved past gym selection
+        const stillOnGymPage = await page.evaluate(() => {
+          const input = document.querySelector('input[type="text"], input[type="search"]');
+          return input && input.value && input.value.toLowerCase().includes('ponte');
         }).catch(() => false);
         
-        dlog(`Dropdown visible: ${dropdownVisible} (attempt ${attempt + 1})`);
+        const clicksAfterGym = clickCounter;
+        const clicksMade = clicksAfterGym - clicksBeforeGym;
         
-        if (dropdownVisible || attempt === 0) {
-          try {
-            dlog(`Looking for gym option: ${gymName} (attempt ${attempt + 1})`);
-      await clickElement(page, [
-              `::-p-aria(${gymName} ${gymName})`,
-              `::-p-text(${gymName})`,
-              `::-p-aria(${gymName})`,
-        '#radix-\\:r6\\:',
-        '::-p-xpath(//*[@id="radix-:r6:"])',
-              ':scope >>> #radix-\\:r6\\:',
-              // Try to find any element containing the gym name
-              `::-p-xpath(//*[contains(text(), "${gymName}")])`,
-              // Try more generic selectors
-              `::-p-xpath(//div[contains(text(), "${gymName}")])`,
-              `::-p-xpath(//span[contains(text(), "${gymName}")])`,
-              `::-p-xpath(//li[contains(text(), "${gymName}")])`,
-              // Try by aria-label
-              `[aria-label*="${gymName}"]`,
-              `[aria-label="${gymName}"]`
-            ], { offset: { x: 209.5, y: 10.3359375 }, debug: DEBUG, timeout: 5000 });
-            gymOptionFound = true;
-            dlog(`✓ Successfully found and clicked gym option on attempt ${attempt + 1}`);
-            break;
-          } catch (e) {
-            dlog(`Attempt ${attempt + 1} failed: ${e?.message}`);
-            // Continue to next attempt
-          }
+        if (!stillOnGymPage) {
+          const summaryMessage = `[GYM SELECTION SUMMARY] Success: true, Method: Puppeteer mouse click at coordinates, Clicks made: ${clicksMade}`;
+          logToFile(summaryMessage);
+          dlog(summaryMessage);
+          await takeScreenshot('gym-after-selection');
+        } else {
+          const errorMsg = `[GYM SELECTION] Failed - still on gym page after clicking`;
+          logToFile(errorMsg);
+          dlog(errorMsg);
+          await takeScreenshot('gym-all-attempts-failed');
+          throw new Error(`Failed to select gym "${gymName}" - still on gym selection page`);
         }
-      }
-      
-      if (!gymOptionFound) {
-        // Take final screenshot before fallback
+      } catch (e) {
+        const errorMsg = `[GYM SELECTION] Error: ${e?.message}`;
+        logToFile(errorMsg);
+        dlog(errorMsg);
         await takeScreenshot('gym-all-attempts-failed');
-        
-        // Last resort: try clicking anywhere in the dropdown or pressing Enter
-        dlog("All selector attempts failed, trying Enter key...");
-        await page.keyboard.press('Enter');
-        await sleep(500);
-        
-        // Take screenshot after Enter key
-        await takeScreenshot('gym-after-enter');
+        throw new Error(`Failed to select gym "${gymName}": ${e?.message}`);
       }
     });
 
@@ -1946,12 +2000,52 @@ async function bookClass({
 
     // Step 10: Select customer from results
     await step("Select customer", async () => {
+      logToFile(`[CUSTOMER SELECTION] Starting customer selection. Current click count: ${clickCounter}`);
+      dlog(`[CUSTOMER SELECTION] Starting customer selection. Current click count: ${clickCounter}`);
+      const clicksBefore = clickCounter;
+      
+      // Take screenshot before selecting customer
+      await takeScreenshot('before-customer-selection');
+      
       await clickElement(page, [
         'div.search-container > div > div',
         '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div)',
         ':scope >>> div.search-container > div > div',
         `::-p-text(${CUSTOMER_NAME})`
-      ], { offset: { x: 201, y: 11 } });
+      ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
+      
+      // Take screenshot immediately after selecting customer to see if booking was triggered
+      await takeScreenshot('after-customer-selection');
+      logToFile(`[CUSTOMER SELECTION] Screenshot taken after customer selection`);
+      
+      // Check if booking was automatically triggered
+      const autoBookingCheck = await page.evaluate(() => {
+        const bodyText = document.body.textContent || '';
+        const hasSuccessNotification = bodyText.toLowerCase().includes('successfully booked') || 
+                                      bodyText.toLowerCase().includes('customer successfully booked');
+        const notifications = Array.from(document.querySelectorAll('[class*="notification"], [class*="toast"], [class*="alert"]'));
+        return {
+          hasSuccessNotification,
+          notificationCount: notifications.filter(n => n.offsetParent !== null).length,
+          notificationTexts: notifications.filter(n => n.offsetParent !== null).map(n => n.textContent?.substring(0, 50)).slice(0, 3)
+        };
+      }).catch(() => ({ hasSuccessNotification: false, notificationCount: 0, notificationTexts: [] }));
+      
+      if (autoBookingCheck.hasSuccessNotification || autoBookingCheck.notificationCount > 0) {
+        logToFile(`[WARNING] Booking notification detected immediately after customer selection! Notification count: ${autoBookingCheck.notificationCount}`);
+        logToFile(`[WARNING] Notification texts: ${autoBookingCheck.notificationTexts.join(', ')}`);
+      }
+      
+      const clicksAfter = clickCounter;
+      const clicksMade = clicksAfter - clicksBefore;
+      const customerLogMsg = `[CUSTOMER SELECTION] Completed. Clicks made: ${clicksMade}, Total clicks so far: ${clickCounter}`;
+      logToFile(customerLogMsg);
+      dlog(customerLogMsg);
+      if (clicksMade > 1) {
+        const warningMsg = `[WARNING] Multiple clicks detected during customer selection! Click count: ${clicksMade}`;
+        logToFile(warningMsg);
+        console.error(warningMsg);
+      }
       await sleep(1000);
     });
 
@@ -1995,6 +2089,9 @@ async function bookClass({
     // Note: Based on the modal UI, this button appears directly after selecting customer
     // We may need to select a plan first, but if plan is already selected, we can click directly
     await step("Click BOOK USING CREDITS button", async () => {
+      logToFile(`[BOOK BUTTON] Starting BOOK USING CREDITS click. Current click count: ${clickCounter}`);
+      dlog(`[BOOK BUTTON] Starting BOOK USING CREDITS click. Current click count: ${clickCounter}`);
+      const clicksBefore = clickCounter;
       dlog(`Looking for BOOK USING CREDITS button to confirm booking...`);
       
       // Wait a bit to ensure modal is fully loaded
@@ -2006,7 +2103,11 @@ async function bookClass({
       dlog(`Using exact selectors from Puppeteer recording...`);
       
       // First try using exact XPath from recording
+      // CRITICAL: Use a flag to ensure we only click ONCE, even if multiple selectors match the same button
       const clicked = await page.evaluate(() => {
+        let buttonClicked = false; // Guard to prevent double-clicks
+        let buttonElement = null;
+        
         // Try XPath from Puppeteer recording first
         const xpath = '/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div[6]/div/button';
         try {
@@ -2014,93 +2115,53 @@ async function bookClass({
           const button = result.singleNodeValue;
           
           if (button && button.offsetParent !== null) {
-            console.log(`[BROWSER] Found BOOK USING CREDITS button via XPath from recording, clicking...`);
-            button.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            
-            // Click with exact offset from recording: x: 318, y: 20.5
-            button.click();
-            
-            // Also dispatch mouse events at exact coordinates
-            const rect = button.getBoundingClientRect();
-            const clickX = rect.left + 318;
-            const clickY = rect.top + 20.5;
-            
-            const mouseDown = new MouseEvent('mousedown', { 
-              bubbles: true, 
-              cancelable: true, 
-              view: window,
-              clientX: clickX,
-              clientY: clickY
-            });
-            const mouseUp = new MouseEvent('mouseup', { 
-              bubbles: true, 
-              cancelable: true, 
-              view: window,
-              clientX: clickX,
-              clientY: clickY
-            });
-            const clickEvent = new MouseEvent('click', { 
-              bubbles: true, 
-              cancelable: true, 
-              view: window,
-              clientX: clickX,
-              clientY: clickY
-            });
-            
-            button.dispatchEvent(mouseDown);
-            button.dispatchEvent(mouseUp);
-            button.dispatchEvent(clickEvent);
-            
-            return true;
+            buttonElement = button;
+            console.log(`[BROWSER CLICK] BOOK USING CREDITS - Found button via XPath`);
           }
         } catch (e) {
           console.log(`[BROWSER] XPath failed: ${e?.message}`);
         }
         
-        // Fallback: try aria-label from recording
-        const ariaButton = document.querySelector('[aria-label*="Calendar Button BOOK USING CREDITS"], [aria-label*="BOOK USING CREDITS"]');
-        if (ariaButton && ariaButton.offsetParent !== null) {
-          console.log(`[BROWSER] Found BOOK USING CREDITS button via aria-label, clicking...`);
-          ariaButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          ariaButton.click();
-          
-          const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-          const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
-          const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-          
-          ariaButton.dispatchEvent(mouseDown);
-          ariaButton.dispatchEvent(mouseUp);
-          ariaButton.dispatchEvent(clickEvent);
-          
-          return true;
-        }
-        
-        // Fallback: try CSS selector from recording
-        const cssButton = document.querySelector('div.customer-overlay button');
-        if (cssButton && cssButton.offsetParent !== null) {
-          const text = cssButton.textContent || '';
-          if (text.includes('BOOK USING CREDITS') || text.includes('BOOK USING')) {
-            console.log(`[BROWSER] Found BOOK USING CREDITS button via CSS selector, clicking...`);
-            cssButton.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            cssButton.click();
-            
-            const mouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true, view: window });
-            const mouseUp = new MouseEvent('mouseup', { bubbles: true, cancelable: true, view: window });
-            const clickEvent = new MouseEvent('click', { bubbles: true, cancelable: true, view: window });
-            
-            cssButton.dispatchEvent(mouseDown);
-            cssButton.dispatchEvent(mouseUp);
-            cssButton.dispatchEvent(clickEvent);
-            
-            return true;
+        // Fallback: try aria-label from recording (only if XPath didn't find it)
+        if (!buttonElement) {
+          const ariaButton = document.querySelector('[aria-label*="Calendar Button BOOK USING CREDITS"], [aria-label*="BOOK USING CREDITS"]');
+          if (ariaButton && ariaButton.offsetParent !== null) {
+            buttonElement = ariaButton;
+            console.log(`[BROWSER CLICK] BOOK USING CREDITS - Found button via aria-label`);
           }
         }
         
-        console.log(`[BROWSER] BOOK USING CREDITS button not found`);
+        // Fallback: try CSS selector from recording (only if previous methods didn't find it)
+        if (!buttonElement) {
+          const cssButton = document.querySelector('div.customer-overlay button');
+          if (cssButton && cssButton.offsetParent !== null) {
+            const text = cssButton.textContent || '';
+            if (text.includes('BOOK USING CREDITS') || text.includes('BOOK USING')) {
+              buttonElement = cssButton;
+              console.log(`[BROWSER CLICK] BOOK USING CREDITS - Found button via CSS selector`);
+            }
+          }
+        }
+        
+        // CRITICAL: Only click ONCE, regardless of which selector found it
+        if (buttonElement && !buttonClicked) {
+          console.log(`[BROWSER CLICK] BOOK USING CREDITS - Clicking button ONCE (no duplicates)`);
+          buttonElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          buttonElement.click();
+          buttonClicked = true;
+          return true;
+        }
+        
+        if (!buttonElement) {
+          console.log(`[BROWSER] BOOK USING CREDITS button not found`);
+        }
         return false;
       }).catch(() => false);
       
       await sleep(500);
+      
+      // Log clicks made in this step
+      const clicksBeforeBook = clickCounter;
       
       // If page.evaluate didn't work, try Puppeteer native click with exact selectors and offset
       if (!clicked) {
@@ -2117,6 +2178,7 @@ async function bookClass({
               const text = await cssButton.evaluate(el => el.textContent || '').catch(() => '');
               if (text.includes('BOOK USING CREDITS') || text.includes('BOOK USING')) {
                 dlog(`Found BOOK USING CREDITS button via CSS selector: ${text.substring(0, 50)}`);
+                logClick('BOOK USING CREDITS button', 'div.customer-overlay button', 'Puppeteer.click(offset)');
                 await cssButton.scrollIntoView();
                 await sleep(300);
                 
@@ -2131,11 +2193,31 @@ async function bookClass({
           dlog(`Puppeteer native click failed: ${e?.message}`);
         }
       } else {
+        logClick('BOOK USING CREDITS button', 'page.evaluate', 'element.click()');
         dlog(`✓ Successfully clicked BOOK USING CREDITS button via page.evaluate`);
       }
       
+      const clicksAfterBook = clickCounter;
+      const clicksMade = clicksAfterBook - clicksBeforeBook;
+      const bookButtonLogMsg = `[BOOK BUTTON] Completed. Clicks made in this step: ${clicksMade}, Total clicks so far: ${clickCounter}`;
+      logToFile(bookButtonLogMsg);
+      dlog(bookButtonLogMsg);
+      if (clicksMade > 1) {
+        const warningMsg = `[WARNING] Multiple clicks detected on BOOK USING CREDITS button! Click count: ${clicksMade}`;
+        logToFile(warningMsg);
+        console.error(warningMsg);
+      }
+      
+      // CRITICAL: Take screenshot immediately after clicking to capture double-booking
+      await takeScreenshot('after-book-using-credits-click');
+      logToFile(`[BOOK BUTTON] Screenshot taken immediately after clicking BOOK USING CREDITS button`);
+      
       // Wait for booking to be processed
       await sleep(2000);
+      
+      // Take another screenshot after waiting to see if notifications appear
+      await takeScreenshot('after-book-using-credits-wait');
+      logToFile(`[BOOK BUTTON] Screenshot taken after 2 second wait`);
       
       // Verify the booking was processed - check if booking completed or if we need to continue
       dlog(`Checking booking status after clicking BOOK USING CREDITS...`);
@@ -2539,13 +2621,25 @@ async function bookClass({
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
 
+    // Log final click summary
+    logToFile(`\n[CLICK SUMMARY] Total clicks performed: ${clickCounter}`);
+    logToFile(`[CLICK SUMMARY] Click log entries: ${clickLog.length}`);
+    if (clickLog.length > 0) {
+      logToFile(`[CLICK SUMMARY] Last 10 clicks:`);
+      clickLog.slice(-10).forEach(log => {
+        logToFile(`  #${log.count} - ${log.location} (${log.method})`);
+      });
+    }
+    
     return {
       ok: true,
       message: `Successfully booked class for ${CUSTOMER_NAME} on ${targetDate} at ${targetTime}`,
       verified: bookingVerified,
       foundInReservations: bookingFoundInReservations,
+      clickCount: clickCounter,
+      clickLog: clickLog.slice(-20), // Include last 20 clicks in response
       ...(reservationDetails ? { reservationDetails } : {}),
-      ...(DEBUG && screenshots.length > 0 ? { screenshots } : {})
+      ...(screenshots.length > 0 ? { screenshots } : {})
     };
 
   } catch (err) {
@@ -2554,7 +2648,7 @@ async function bookClass({
     return {
       ok: false,
       error: err?.message || String(err),
-      ...(DEBUG && screenshots.length > 0 ? { screenshots } : {})
+      ...(screenshots.length > 0 ? { screenshots } : {})
     };
   }
 }
