@@ -1,12 +1,20 @@
 // server.js — CRM Booking Scraper API (Express + Puppeteer)
 
+console.log("🚀 Starting server initialization...");
+
 import express from "express";
+console.log("✅ Express imported");
+
 import puppeteer from "puppeteer";
+console.log("✅ Puppeteer imported");
+
 import fs from "fs";
 import path from "path";
+console.log("✅ Core modules imported");
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
+console.log("✅ Express app created and middleware configured");
 
 // Setup logging to file
 const LOG_DIR = "/tmp";
@@ -2370,11 +2378,12 @@ app.post("/book", async (req, res) => {
 
 // Error handlers - log but allow server to continue
 process.on("unhandledRejection", (e) => {
-  console.error("unhandledRejection:", e);
+  console.error("❌ unhandledRejection:", e);
 });
 
 process.on("uncaughtException", (e) => {
-  console.error("uncaughtException:", e);
+  console.error("❌ uncaughtException:", e);
+  console.error("Stack:", e.stack);
   // Log the error but don't exit - Railway will restart if needed
 });
 
@@ -2382,15 +2391,33 @@ process.on("uncaughtException", (e) => {
 const port = process.env.PORT || 3000;
 const host = "0.0.0.0";
 
-// Start the server
-const server = app.listen(port, host, () => {
-  console.log(`🚀 Booking scraper API running on ${host}:${port}`);
-  console.log(`✅ Healthcheck endpoint available at http://${host}:${port}/`);
-});
+console.log(`📡 Attempting to start server on ${host}:${port}...`);
 
-// Handle server errors
-server.on('error', (error) => {
-  console.error("Server error:", error);
-  // Log but don't exit - Railway will handle restarts
-});
+// Start the server with explicit error handling
+try {
+  const server = app.listen(port, host, () => {
+    console.log(`🚀 Booking scraper API running on ${host}:${port}`);
+    console.log(`✅ Healthcheck endpoint available at http://${host}:${port}/`);
+    console.log(`✅ Server is ready to accept connections`);
+  });
+
+  // Handle server errors
+  server.on('error', (error) => {
+    console.error("❌ Server error:", error);
+    console.error("Error code:", error.code);
+    console.error("Error message:", error.message);
+    // Log but don't exit - Railway will handle restarts
+  });
+
+  // Log when server is listening
+  server.on('listening', () => {
+    console.log(`✅ Server is listening on ${host}:${port}`);
+  });
+
+  console.log(`✅ Server startup initiated`);
+} catch (error) {
+  console.error("❌ Failed to start server:", error);
+  console.error("Stack:", error.stack);
+  // Don't exit - let Railway see the error and restart
+}
 
