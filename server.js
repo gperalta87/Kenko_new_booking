@@ -1737,7 +1737,9 @@ async function bookClass({
         }
         dlog(`✓ Fallback dropdown click succeeded`);
       } else {
-        dlog(`✓ Successfully clicked dropdown using method: ${dropdownClicked.method}`);
+        const dropdownMethodMsg = `[DATE NAV DROPDOWN] Successfully clicked dropdown using method: ${dropdownClicked.method}`;
+        logToFile(dropdownMethodMsg);
+        dlog(`✓ ${dropdownMethodMsg}`);
       }
       
       // Give the dropdown time to open (increased for Railway)
@@ -1848,7 +1850,9 @@ async function bookClass({
           }).catch(() => false);
           
           if (daySelected) {
-            dlog(`✓ Day view selected using keyboard navigation`);
+            const keyboardMethodMsg = `[DATE NAV DAY OPTION] Successfully selected Day using method: keyboard_navigation`;
+            logToFile(keyboardMethodMsg);
+            dlog(`✓ ${keyboardMethodMsg}`);
             await takeScreenshot('after-clicking-day-option');
             // Skip the rest of the day clicking logic - continue to next step
           } else {
@@ -1912,10 +1916,14 @@ async function bookClass({
       }).catch((e) => ({ success: false, reason: e?.message || 'error' }));
       
       if (dayClicked.success) {
-        dlog(`✓ Successfully clicked Day option using method: ${dayClicked.method}`);
+        const dayMethodMsg = `[DATE NAV DAY OPTION] Successfully clicked Day option using method: ${dayClicked.method}`;
+        logToFile(dayMethodMsg);
+        dlog(`✓ ${dayMethodMsg}`);
         await sleep(1500);
       } else {
-        dlog(`✗ Could not click Day option: ${dayClicked.reason}, trying clickElement fallback...`);
+        const dayFailMsg = `[DATE NAV DAY OPTION] Could not click Day option: ${dayClicked.reason}, trying clickElement fallback...`;
+        logToFile(dayFailMsg);
+        dlog(`✗ ${dayFailMsg}`);
         
         // Final fallback: use clickElement
       await clickElement(page, [
@@ -2085,7 +2093,9 @@ async function bookClass({
         }, day, month, year).catch(() => ({ success: false, reason: 'error' }));
         
         if (directDateClick.success) {
-          dlog(`✓ Successfully clicked target date ${day}/${month}/${year} directly: ${directDateClick.method}`);
+          const dateMethodMsg = `[DATE NAV DATE PICKER] Successfully clicked target date ${day}/${month}/${year} using method: ${directDateClick.method}`;
+          logToFile(dateMethodMsg);
+          dlog(`✓ ${dateMethodMsg}`);
           await sleep(1500);
           
           // Verify date picker closed
@@ -2225,7 +2235,9 @@ async function bookClass({
             }, day).catch(() => ({ success: false, reason: 'error' }));
             
             if (dayClicked.success) {
-              dlog(`✓ Successfully clicked day ${day} using method: ${dayClicked.method}`);
+              const dayPickerMethodMsg = `[DATE NAV DATE PICKER] Successfully clicked day ${day} using method: ${dayClicked.method}`;
+              logToFile(dayPickerMethodMsg);
+              dlog(`✓ ${dayPickerMethodMsg}`);
               await sleep(1500);
               
               // Verify the date was actually selected
