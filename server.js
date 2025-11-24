@@ -1070,12 +1070,23 @@ async function bookClass({
       
       await page.setViewport({ width: 1920, height: 1080 }); // Use realistic viewport
       dlog("Navigating to login page");
+      
+      // Track if frame detaches during navigation
+      let frameDetached = false;
+      const frameDetachHandler = () => {
+        frameDetached = true;
+        dlog("⚠ Frame detached during navigation");
+      };
+      page.once("framedetached", frameDetachHandler);
+      
       try {
+        // Use networkidle2 to wait for network activity to settle (more reliable than domcontentloaded)
+        // networkidle2 = wait until there are no more than 2 network connections for at least 500ms
         await page.goto("https://partners.gokenko.com/login", { 
-          waitUntil: "domcontentloaded",
+          waitUntil: "networkidle2",
           timeout: 30000 
         });
-        dlog("Page loaded");
+        dlog("Page loaded (networkidle2)");
       } catch (navError) {
         dlog(`Navigation error: ${navError?.message}`);
         // Check if page is still valid
@@ -1086,6 +1097,22 @@ async function bookClass({
           throw new Error(`Page became invalid during navigation: ${e?.message}`);
         }
         // Continue anyway if we got some page loaded
+      } finally {
+        page.off("framedetached", frameDetachHandler);
+      }
+      
+      // Wait for page to stabilize after navigation
+      await sleep(2000);
+      
+      // Verify page is still valid and hasn't detached
+      try {
+        const pageUrl = page.url();
+        dlog(`Page URL after navigation: ${pageUrl}`);
+        if (frameDetached) {
+          throw new Error("Frame detached during navigation");
+        }
+      } catch (e) {
+        throw new Error(`Page became invalid after navigation: ${e?.message}`);
       }
       
       // Verify stealth is working - check if webdriver is hidden
@@ -1110,14 +1137,36 @@ async function bookClass({
       } catch (evalError) {
         dlog(`⚠ Stealth check failed (page may have navigated): ${evalError?.message}`);
         logToFile(`⚠ Stealth check failed: ${evalError?.message}`);
+        // If frame detached, throw error
+        if (evalError.message.includes("detached") || evalError.message.includes("closed")) {
+          throw new Error(`Page frame detached after navigation: ${evalError?.message}`);
+        }
         // Continue anyway - stealth plugin should still be active
       }
       
-      await sleep(1000); // Wait for page to fully render and scripts to load
+      // Additional wait for page to fully render and scripts to load
+      await sleep(1000);
+      
+      // Final check that page is still valid before proceeding
+      try {
+        const finalUrl = page.url();
+        dlog(`Final page URL check: ${finalUrl}`);
+      } catch (e) {
+        throw new Error(`Page became invalid before proceeding: ${e?.message}`);
+      }
     });
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
     await step("Enter gym location", async () => {
+      // CRITICAL: Verify page is still valid before proceeding
+      // Frames may detach after navigation, so we need to check
+      try {
+        const currentUrl = page.url();
+        dlog(`Page is valid, current URL: ${currentUrl}`);
+      } catch (e) {
+        throw new Error(`Page frame detached before gym selection: ${e?.message}`);
+      }
+      
       // Wait for the input field to be visible - use the same selector as reference
       // Reference code uses: input[placeholder*="Search for your business"]
       dlog("Waiting for gym name input field");
