@@ -2794,12 +2794,14 @@ async function bookClass({
 
     // Step 8: Search for customer (with retry logic for Fitpass One through Twenty)
     await step("Search for customer", async () => {
-      // Try Fitpass One, Two, Three, etc. up to Twenty
+      // Try email format first (fitpass1), then Fitpass One, Two, Three, etc. up to Twenty
       const MAX_CUSTOMER_RETRIES = 20;
       let customerSelectedSuccessfully = false;
       
       for (let customerNumber = 1; customerNumber <= MAX_CUSTOMER_RETRIES; customerNumber++) {
-        const customerName = customerNumber === 1 ? "Fitpass One" : `Fitpass ${customerNumber === 2 ? "Two" : customerNumber === 3 ? "Three" : customerNumber === 4 ? "Four" : customerNumber === 5 ? "Five" : customerNumber === 6 ? "Six" : customerNumber === 7 ? "Seven" : customerNumber === 8 ? "Eight" : customerNumber === 9 ? "Nine" : customerNumber === 10 ? "Ten" : customerNumber === 11 ? "Eleven" : customerNumber === 12 ? "Twelve" : customerNumber === 13 ? "Thirteen" : customerNumber === 14 ? "Fourteen" : customerNumber === 15 ? "Fifteen" : customerNumber === 16 ? "Sixteen" : customerNumber === 17 ? "Seventeen" : customerNumber === 18 ? "Eighteen" : customerNumber === 19 ? "Nineteen" : "Twenty"}`;
+        // First try: use email format "fitpass1"
+        // Subsequent tries: use name format "Fitpass One", "Fitpass Two", etc.
+        const customerName = customerNumber === 1 ? "fitpass1" : `Fitpass ${customerNumber === 2 ? "Two" : customerNumber === 3 ? "Three" : customerNumber === 4 ? "Four" : customerNumber === 5 ? "Five" : customerNumber === 6 ? "Six" : customerNumber === 7 ? "Seven" : customerNumber === 8 ? "Eight" : customerNumber === 9 ? "Nine" : customerNumber === 10 ? "Ten" : customerNumber === 11 ? "Eleven" : customerNumber === 12 ? "Twelve" : customerNumber === 13 ? "Thirteen" : customerNumber === 14 ? "Fourteen" : customerNumber === 15 ? "Fifteen" : customerNumber === 16 ? "Sixteen" : customerNumber === 17 ? "Seventeen" : customerNumber === 18 ? "Eighteen" : customerNumber === 19 ? "Nineteen" : "Twenty"}`;
         const customerSearchValue = customerName.toLowerCase();
         
         if (customerNumber > 1) {
@@ -3197,9 +3199,11 @@ async function bookClass({
         
         const customerOptions = [];
         
-        // Extract the number part from customer name (e.g., "one", "two", "three", etc.)
+        // Extract the number part from customer name (e.g., "one", "two", "three", or "1", "2", etc.)
         const customerNameLower = customerNameParam.toLowerCase();
         const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
+        // Check if it's email format (e.g., "fitpass1")
+        const isEmailFormat = /^fitpass\d+$/.test(customerNameLower);
         
         // Priority 1: Look for span elements inside div.customer-overlay (as shown in recording)
         const spanElements = Array.from(searchRoot.querySelectorAll('div.customer-overlay span, span'));
@@ -3217,7 +3221,7 @@ async function bookClass({
           const text = (el.textContent || '').trim();
           const textLower = text.toLowerCase();
           
-          // CRITICAL: Look for the current customer name (e.g., "Fitpass One", "Fitpass Two", etc.)
+          // CRITICAL: Look for the current customer name (e.g., "Fitpass One", "Fitpass Two", "fitpass1", etc.)
           // Customer names should be less than 200 characters (may include email like "fitpass1@test.com  |")
           if (text.length > 200) continue; // Skip huge elements that contain entire page
           
@@ -3226,13 +3230,20 @@ async function bookClass({
           const hasNumberWord = customerNumberWord ? textLower.includes(customerNumberWord) : false;
           const hasEmailPattern = textLower.includes('@test.com') || textLower.includes('@'); // Recording shows email in text
           
+          // For email format (fitpass1), check for direct match or email pattern
+          const matchesEmailFormat = isEmailFormat && (
+            textLower.includes(customerNameLower) || // Direct match: "fitpass1"
+            textLower.includes(customerNameLower + '@') || // Email: "fitpass1@"
+            textLower.match(new RegExp(`fitpass\\s*${customerNumberWord}\\b`, 'i')) !== null // "fitpass 1" or "fitpass1"
+          );
+          
           // More flexible matching: if it has fitpass and email, or fitpass and number word
           // Also check for number patterns (1, 2, 3, etc.) in email or text
           const hasNumberPattern = customerNumberWord ? 
             (textLower.match(/\bfitpass\s*(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b/i) !== null) :
             false;
           
-          if (hasFitpass && (hasNumberWord || hasEmailPattern || hasNumberPattern)) {
+          if (hasFitpass && (hasNumberWord || hasEmailPattern || hasNumberPattern || matchesEmailFormat)) {
             // Make sure it's not just "fitpass" alone - must have the number word, email, or number pattern
             if (textLower === 'fitpass' || textLower.trim() === 'fitpass') continue; // Skip if it's just "fitpass"
             
@@ -3392,12 +3403,24 @@ async function bookClass({
             const inputs = Array.from(document.querySelectorAll('input'));
             const customerNameLower = customerNameParam.toLowerCase();
             const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
+            const isEmailFormat = /^fitpass\d+$/.test(customerNameLower);
+            
             for (const input of inputs) {
               if (input.offsetParent === null) continue;
               const value = (input.value || '').trim();
               const valueLower = value.toLowerCase();
-              // If value contains the full customer name (not just "fitpass")
-              if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
+              
+              // For email format (fitpass1), check for direct match or email pattern
+              if (isEmailFormat) {
+                if (valueLower.includes(customerNameLower) || // Direct match: "fitpass1"
+                    valueLower.includes(customerNameLower + '@') || // Email: "fitpass1@"
+                    valueLower.match(new RegExp(`fitpass\\s*${customerNumberWord}\\b`, 'i')) !== null) { // "fitpass 1" or "fitpass1"
+                  return true;
+                }
+              }
+              
+              // For name format (Fitpass One), check if value contains fitpass and number word
+              if (valueLower.includes('fitpass') && customerNumberWord && valueLower.includes(customerNumberWord)) {
                 return true;
               }
             }
