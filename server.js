@@ -1092,40 +1092,9 @@ async function bookClass({
         dlog(`Human behavior simulation failed (non-critical): ${e?.message}`);
       }
       
-      // Wait for the gym input field to appear - this confirms the page is fully loaded and interactive
-      // Don't check page.url() immediately as it might trigger detection
-      try {
-        dlog("Waiting for gym input field to confirm page is interactive...");
-        await page.waitForSelector('input[placeholder*="Search"], input[type="text"], input[type="search"]', { 
-          visible: true, 
-          timeout: 15000 
-        });
-        dlog("Gym input field found - page is interactive");
-        
-        // Now that we know the page is interactive, verify URL
-        try {
-          const pageUrl = page.url();
-          dlog(`Page URL after input found: ${pageUrl}`);
-        } catch (e) {
-          dlog(`⚠ Could not get page URL (non-critical): ${e?.message}`);
-        }
-      } catch (e) {
-        // If we can't find the input, the page might have closed or not loaded properly
-        dlog(`⚠ Input field not found: ${e?.message}`);
-        // Try to check if page is still valid (but don't throw error if frame is detached)
-        try {
-          const testUrl = page.url();
-          dlog(`Page URL when input not found: ${testUrl}`);
-          // If we can get the URL, page might still be valid but input not loaded yet
-          // Continue and let the next step handle finding the input
-        } catch (urlError) {
-          // Frame detachment is normal during navigation - don't throw error
-          // The next step will handle finding the input or throw a more specific error
-          dlog(`⚠ Could not get page URL (frame may have detached): ${urlError?.message}`);
-          // Continue anyway - let the next step handle it
-        }
-        dlog("⚠ Input field not found yet - continuing to next step");
-      }
+      // Don't wait for input field during navigation - let the next step handle it
+      // This avoids potential issues with waitForSelector triggering detection
+      dlog("Navigation complete - will find input field in next step");
       
       // Verify stealth is working - check if webdriver is hidden
       // This is optional - if frame is detached, we'll skip it and continue
