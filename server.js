@@ -485,57 +485,29 @@ async function bookClass({
   
   // CRITICAL: Use CDP (Chrome DevTools Protocol) to remove automation indicators
   // This is MORE aggressive than just removing flags - it directly overrides browser internals
-  const client = await page.target().createCDPSession();
-  await client.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `
-      // Remove webdriver property
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined,
-      });
-      
-      // Override Chrome runtime
-      window.chrome = {
-        runtime: {},
-        loadTimes: function() {},
-        csi: function() {},
-        app: {}
-      };
-      
-      // Override permissions
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
-      
-      // Override plugins to show realistic plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5], // Return array with length to simulate plugins
-      });
-      
-      // Override mimeTypes
-      Object.defineProperty(navigator, 'mimeTypes', {
-        get: () => [1, 2, 3, 4, 5],
-      });
-      
-      // Remove automation indicators from window object
-      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-    `
-  });
-  
-  // Use CDP to override automation flags
-  await client.send('Runtime.addBinding', { name: 'cdp' });
-  await client.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `
-      // Override automation detection
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => false,
-      });
-    `
-  });
+  try {
+    const client = await page.target().createCDPSession();
+    await client.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `
+        // Remove webdriver property
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        
+        // Remove automation indicators from window object
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+        delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
+      `
+    });
+    dlog("CDP automation override active");
+  } catch (cdpError) {
+    dlog(`⚠ CDP session creation failed (non-critical): ${cdpError?.message}`);
+    // Continue without CDP - evaluateOnNewDocument should handle most cases
+  }
   
   // CRITICAL: puppeteer-extra-plugin-stealth is already applied via puppeteer.use(StealthPlugin())
   // This plugin handles most anti-scraping detection automatically
@@ -620,21 +592,17 @@ async function bookClass({
     
     // Override timezone to match Mac (VMs often use UTC)
     // This is critical - VMs are often detected by timezone mismatches
-    const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
-    Date.prototype.getTimezoneOffset = function() {
-      // Return offset for US timezone (e.g., EST/EDT)
-      // This makes Railway look like it's running in US timezone like a real Mac
-      return 300; // EST offset (UTC-5) - adjust if needed for your location
-    };
-    
-    // Override Intl.DateTimeFormat to return Mac-like timezone
-    const originalDateTimeFormat = Intl.DateTimeFormat;
-    Intl.DateTimeFormat = function(...args) {
-      if (args.length === 0 || (args.length === 1 && typeof args[0] === 'string')) {
-        return new originalDateTimeFormat('en-US', { timeZone: 'America/New_York' });
-      }
-      return new originalDateTimeFormat(...args);
-    };
+    // Note: We're being careful here to not break existing functionality
+    try {
+      const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+      Date.prototype.getTimezoneOffset = function() {
+        // Return offset for US timezone (e.g., EST/EDT)
+        // This makes Railway look like it's running in US timezone like a real Mac
+        return 300; // EST offset (UTC-5) - adjust if needed for your location
+      };
+    } catch (e) {
+      // Silently fail if timezone override doesn't work
+    }
     
     // Override webdriver to ensure it's undefined (stealth plugin should do this, but double-check)
     Object.defineProperty(navigator, 'webdriver', {
