@@ -549,9 +549,14 @@ async function bookClass({
   
   // Override navigator properties to match local Chrome (not headless)
   // Enhanced fingerprinting to appear as real browser session on a real Mac (not VM)
+  // TEMPORARILY DISABLED: Testing if this is causing page to close
   await page.evaluateOnNewDocument(() => {
     // Wrap everything in try-catch to prevent any errors from crashing the page
     try {
+      // MINIMAL OVERRIDES ONLY - testing if aggressive overrides cause page to close
+      // Most VM detection evasion temporarily disabled
+      
+      /*
       // Override platform to match local Mac
       if (navigator) {
         Object.defineProperty(navigator, 'platform', {
@@ -905,6 +910,20 @@ async function bookClass({
     } catch (e) {
       // Silently fail
     }
+      */
+      
+      // MINIMAL OVERRIDES - Only keep essential ones that don't cause errors
+      // Override webdriver to ensure it's undefined (stealth plugin should do this, but double-check)
+      if (navigator) {
+        try {
+          Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined,
+          });
+        } catch (e) {
+          // Silently fail
+        }
+      }
+      
     } catch (globalError) {
       // Catch any unhandled errors in evaluateOnNewDocument to prevent page crash
       console.error('[VM EVASION] Error in evaluateOnNewDocument:', globalError);
