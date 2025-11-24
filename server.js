@@ -549,7 +549,8 @@ async function bookClass({
   
   // Override navigator properties to match local Chrome (not headless)
   // Enhanced fingerprinting to appear as real browser session on a real Mac (not VM)
-  // TEMPORARILY DISABLED: Testing if this is causing page to close
+  // COMPLETELY DISABLED: Testing if evaluateOnNewDocument is causing page to close
+  /*
   await page.evaluateOnNewDocument(() => {
     // Wrap everything in try-catch to prevent any errors from crashing the page
     try {
@@ -929,6 +930,7 @@ async function bookClass({
       console.error('[VM EVASION] Error in evaluateOnNewDocument:', globalError);
     }
   });
+  */
   
   // Add human-like mouse movements and scrolling behavior
   // This makes the session look more realistic
