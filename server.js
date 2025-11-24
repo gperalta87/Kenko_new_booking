@@ -2593,8 +2593,8 @@ async function bookClass({
             }
           }
           
-          // Wait for the click to register
-          await sleep(500);
+          // Wait for the click to register and page to stabilize (especially after errors)
+          await sleep(2000); // Increased from 500ms to 2000ms to handle error recovery
           
           // Take screenshot immediately after clicking class to see what appeared
           await takeScreenshot(`after-class-click${attempt > 1 ? `-retry-${attempt}` : ''}`);
@@ -2669,21 +2669,50 @@ async function bookClass({
           // This should be visible after dismissing the delete modal
           // Wait longer for the booking dialog to fully load (especially after 403 errors)
           dlog(`Waiting for booking dialog to load after dismissing delete modal...`);
-          await sleep(2000); // Increased from 1000ms to 2000ms
+          
+          // Wait longer after dismissing modal to let page stabilize (especially if there were errors)
+          await sleep(3000); // Increased from 2000ms to 3000ms to handle error recovery
           
           // Wait for network idle to ensure all resources are loaded
           try {
-            await page.waitForNetworkIdle({ idleTime: 500, timeout: 3000 }).catch(() => {
+            await page.waitForNetworkIdle({ idleTime: 1000, timeout: 5000 }).catch(() => {
               dlog(`Network idle wait timed out, continuing...`);
             });
           } catch (e) {
             dlog(`Network idle wait error: ${e?.message}`);
           }
           
+          // Additional wait for page to recover from any JavaScript errors
+          await sleep(2000);
+          
           // Try multiple times with progressive waits to find the "Book Customer" button
           let bookCustomerFound = false;
-          for (let checkAttempt = 0; checkAttempt < 5; checkAttempt++) {
-            await sleep(500 + checkAttempt * 500); // Progressive wait: 500ms, 1000ms, 1500ms, 2000ms, 2500ms
+          for (let checkAttempt = 0; checkAttempt < 8; checkAttempt++) { // Increased from 5 to 8 attempts
+            await sleep(1000 + checkAttempt * 500); // Progressive wait: 1000ms, 1500ms, 2000ms, 2500ms, 3000ms, 3500ms, 4000ms, 4500ms
+            
+            // Check for page errors before looking for button
+            const pageErrors = await page.evaluate(() => {
+              // Check if there are any visible error messages
+              const errorElements = Array.from(document.querySelectorAll('[class*="error"], [class*="Error"], .error-message, .alert-error'));
+              const hasVisibleErrors = errorElements.some(el => el.offsetParent !== null);
+              
+              // Check if page is in a broken state (no interactive elements)
+              const interactiveElements = Array.from(document.querySelectorAll('button, [role="button"], input, select, textarea'));
+              const hasInteractiveElements = interactiveElements.some(el => el.offsetParent !== null);
+              
+              return {
+                hasVisibleErrors,
+                hasInteractiveElements,
+                errorCount: errorElements.length,
+                interactiveCount: interactiveElements.length
+              };
+            }).catch(() => ({ hasVisibleErrors: false, hasInteractiveElements: true, errorCount: 0, interactiveCount: 0 }));
+            
+            if (!pageErrors.hasInteractiveElements) {
+              dlog(`  Check ${checkAttempt + 1}/8: Page appears broken (no interactive elements), waiting longer...`);
+              await sleep(2000);
+              continue;
+            }
             
             const clickVerified = await page.evaluate(() => {
               // Try multiple selectors for "Book Customer" button
@@ -2693,21 +2722,28 @@ async function bookClass({
                 'div.booking-btn button',
                 'div.booking-btn > button',
                 'button[class*="booking"]',
-                'button[class*="customer"]'
+                'button[class*="customer"]',
+                '::-p-text(Book Customer)',
+                '::-p-aria(Book Customer)'
               ];
               
               for (const selector of selectors) {
-                const buttons = Array.from(document.querySelectorAll(selector));
-                for (const btn of buttons) {
-                  if (btn.offsetParent === null) continue;
-                  const text = (btn.textContent || '').trim().toLowerCase();
-                  if (text === 'book customer' || text.includes('book customer')) {
-                    return {
-                      bookCustomerButtonVisible: true,
-                      bookCustomerButtonText: btn.textContent,
-                      selector: selector
-                    };
+                try {
+                  const buttons = Array.from(document.querySelectorAll(selector));
+                  for (const btn of buttons) {
+                    if (btn.offsetParent === null) continue;
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    if (text === 'book customer' || text.includes('book customer')) {
+                      return {
+                        bookCustomerButtonVisible: true,
+                        bookCustomerButtonText: btn.textContent,
+                        selector: selector
+                      };
+                    }
                   }
+                } catch (e) {
+                  // Skip invalid selectors
+                  continue;
                 }
               }
               
@@ -2724,7 +2760,7 @@ async function bookClass({
               bookCustomerFound = true;
               break;
             } else {
-              dlog(`  Check ${checkAttempt + 1}/5: "Book Customer" button not found yet, waiting...`);
+              dlog(`  Check ${checkAttempt + 1}/8: "Book Customer" button not found yet, waiting...`);
             }
           }
           
