@@ -1017,21 +1017,13 @@ async function bookClass({
   };
   page.setDefaultTimeout(TIMEOUT);
 
-  // Log page events
+  // Log page events (simplified - only essential ones)
   page.on("console", (msg) => logToFile(`[PAGE] ${msg.text()}`));
   page.on("requestfailed", (r) => logToFile(`[REQ FAIL] ${r.url()} ${r.failure()?.errorText}`));
   page.on("pageerror", (error) => logToFile(`[PAGE] ERROR ${error.message}`));
-  page.on("error", (error) => logToFile(`[PAGE] ERROR ${error.message}`));
-  page.on("close", () => logToFile(`[PAGE] Page closed`));
-  page.on("framedetached", (frame) => logToFile(`[PAGE] Frame detached: ${frame.url()}`));
-
-  // Validate page is ready before starting
-  try {
-    const pageUrl = page.url();
-    dlog(`Page ready, initial URL: ${pageUrl}`);
-  } catch (e) {
-    throw new Error(`Page is not valid before starting: ${e?.message}`);
-  }
+  
+  // REMOVED: Page validity check before starting - might trigger detection
+  // REMOVED: framedetached listener - might interfere with normal navigation
 
   const step = async (label, fn) => {
     logToFile(`➡️ ${label}`);
