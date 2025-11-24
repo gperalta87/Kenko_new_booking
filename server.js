@@ -403,7 +403,7 @@ async function bookClass({
     "--disable-popup-blocking",
     "--disable-translate",
     "--safebrowsing-disable-auto-update",
-    "--enable-automation",
+    // REMOVED: "--enable-automation" - This flag makes automation detectable!
     "--password-store=basic",
     "--use-mock-keychain",
     "--hide-scrollbars",
@@ -477,9 +477,64 @@ async function bookClass({
 
   const page = await browser.newPage();
   
+  // CRITICAL: Use CDP (Chrome DevTools Protocol) to remove automation indicators
+  // This is MORE aggressive than just removing flags - it directly overrides browser internals
+  const client = await page.target().createCDPSession();
+  await client.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `
+      // Remove webdriver property
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => undefined,
+      });
+      
+      // Override Chrome runtime
+      window.chrome = {
+        runtime: {},
+        loadTimes: function() {},
+        csi: function() {},
+        app: {}
+      };
+      
+      // Override permissions
+      const originalQuery = window.navigator.permissions.query;
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
+      
+      // Override plugins to show realistic plugins
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5], // Return array with length to simulate plugins
+      });
+      
+      // Override mimeTypes
+      Object.defineProperty(navigator, 'mimeTypes', {
+        get: () => [1, 2, 3, 4, 5],
+      });
+      
+      // Remove automation indicators from window object
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+      delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    `
+  });
+  
+  // Use CDP to override automation flags
+  await client.send('Runtime.addBinding', { name: 'cdp' });
+  await client.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `
+      // Override automation detection
+      Object.defineProperty(navigator, 'webdriver', {
+        get: () => false,
+      });
+    `
+  });
+  
   // CRITICAL: puppeteer-extra-plugin-stealth is already applied via puppeteer.use(StealthPlugin())
   // This plugin handles most anti-scraping detection automatically
   dlog("Stealth plugin is active (puppeteer-extra-plugin-stealth)");
+  dlog("CDP automation override active");
   
   // CRITICAL: Set User-Agent to match local Chrome EXACTLY (Chrome 131 on macOS)
   // Railway needs to look exactly like a local Chrome browser, not headless
@@ -565,13 +620,89 @@ async function bookClass({
       });
     }
     
-    // Add Chrome-specific properties
+    // Override plugins to show realistic plugins (Chrome typically has 5 plugins)
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => {
+        const plugins = [];
+        // Create realistic plugin objects
+        for (let i = 0; i < 5; i++) {
+          plugins.push({
+            name: `Plugin ${i + 1}`,
+            description: 'Plugin description',
+            filename: 'internal-pdf-viewer',
+            length: 1
+          });
+        }
+        return plugins;
+      },
+    });
+    
+    // Override mimeTypes to match plugins
+    Object.defineProperty(navigator, 'mimeTypes', {
+      get: () => {
+        const mimeTypes = [];
+        for (let i = 0; i < 5; i++) {
+          mimeTypes.push({
+            type: 'application/pdf',
+            suffixes: 'pdf',
+            description: 'PDF Document',
+            enabledPlugin: navigator.plugins[i] || null
+          });
+        }
+        return mimeTypes;
+      },
+    });
+    
+    // Add Chrome-specific properties (must match real Chrome)
     window.chrome = {
       runtime: {},
-      loadTimes: function() {},
-      csi: function() {},
-      app: {}
+      loadTimes: function() {
+        return {
+          commitLoadTime: Date.now() / 1000 - Math.random() * 2,
+          connectionInfo: 'http/1.1',
+          finishDocumentLoadTime: Date.now() / 1000 - Math.random(),
+          finishLoadTime: Date.now() / 1000 - Math.random() * 0.5,
+          firstPaintAfterLoadTime: 0,
+          firstPaintTime: Date.now() / 1000 - Math.random() * 1.5,
+          navigationType: 'Other',
+          npnNegotiatedProtocol: 'unknown',
+          requestTime: Date.now() / 1000 - Math.random() * 3,
+          startLoadTime: Date.now() / 1000 - Math.random() * 3,
+          wasAlternateProtocolAvailable: false,
+          wasFetchedViaSpdy: false,
+          wasNpnNegotiated: false
+        };
+      },
+      csi: function() {
+        return {
+          startE: Date.now() - Math.random() * 1000,
+          onloadT: Date.now() - Math.random() * 500,
+          pageT: Math.random() * 1000 + 500,
+          tran: 15
+        };
+      },
+      app: {
+        isInstalled: false,
+        InstallState: {
+          DISABLED: 'disabled',
+          INSTALLED: 'installed',
+          NOT_INSTALLED: 'not_installed'
+        },
+        RunningState: {
+          CANNOT_RUN: 'cannot_run',
+          READY_TO_RUN: 'ready_to_run',
+          RUNNING: 'running'
+        }
+      }
     };
+    
+    // Remove automation detection variables
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
     
     // Override permissions API to return realistic values
     const originalQuery = window.navigator.permissions.query;
@@ -580,6 +711,20 @@ async function bookClass({
         Promise.resolve({ state: Notification.permission }) :
         originalQuery(parameters)
     );
+    
+    // Override getBattery to return realistic values
+    if (navigator.getBattery) {
+      navigator.getBattery = () => Promise.resolve({
+        charging: true,
+        chargingTime: 0,
+        dischargingTime: Infinity,
+        level: 1,
+        onchargingchange: null,
+        onchargingtimechange: null,
+        ondischargingtimechange: null,
+        onlevelchange: null
+      });
+    }
   });
   
   // Add human-like mouse movements and scrolling behavior
@@ -607,6 +752,20 @@ async function bookClass({
     } catch (e) {
       // Ignore errors - this is just for realism
     }
+  };
+  
+  // Add random human-like delay before critical actions
+  // This prevents automation detection by making actions look more natural
+  const humanDelay = async (minMs = 200, maxMs = 800) => {
+    const delay = Math.floor(Math.random() * (maxMs - minMs)) + minMs;
+    await sleep(delay);
+  };
+  
+  // Simulate human reading/thinking time before clicking
+  const humanThinkingDelay = async () => {
+    // Humans typically take 1-3 seconds to read and decide before clicking
+    const delay = Math.floor(Math.random() * 2000) + 1000;
+    await sleep(delay);
   };
   
   // Override permissions (for both domains)
@@ -2502,6 +2661,13 @@ async function bookClass({
           // Now click it using Puppeteer's native click methods
           dlog(`Attempting to click the class element using Puppeteer... (attempt ${attempt})`);
           
+          // CRITICAL: Add human-like behavior before clicking to prevent automation detection
+          // Simulate human reading/thinking time
+          await humanThinkingDelay();
+          
+          // Simulate mouse movement to the element (humans move mouse before clicking)
+          await simulateHumanBehavior();
+          
           let clicked = false;
           
           // Method 1: Try using the selector if available
@@ -2514,13 +2680,23 @@ async function bookClass({
                 if (isVisible) {
                   dlog(`  Clicking using selector: ${classInfo.selector}`);
                   await element.scrollIntoView();
-                  await sleep(300);
+                  
+                  // Human-like delay after scrolling
+                  await humanDelay(300, 600);
                   
                   // Click at the left side of the element, avoiding any buttons inside
                   const box = await element.boundingBox();
                   if (box) {
+                    // Move mouse to element first (human behavior)
+                    const clickX = box.x + box.width * 0.12;
+                    const clickY = box.y + box.height / 2;
+                    await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
+                    
+                    // Small delay before clicking (humans don't click instantly)
+                    await humanDelay(100, 300);
+                    
                     // Click at 12% from left edge to avoid delete buttons (usually on the right)
-                    await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
+                    await page.mouse.click(clickX, clickY);
                     dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
                   } else {
                     await element.click();
@@ -2560,17 +2736,27 @@ async function bookClass({
                   if (eventHour24 === targetHour && eventMinute === targetMinute) {
                     dlog(`  Found matching element at index ${i}, clicking...`);
                     await element.scrollIntoView();
-                    await sleep(300);
                     
-                  // Click at the left side of the element to avoid delete buttons
-                  const box = await element.boundingBox();
-                  if (box) {
-                    // Click at 12% from left edge (delete buttons are usually on the right)
-                    await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
-                    dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
-                  } else {
-                    await element.click();
-                  }
+                    // Human-like delay after scrolling
+                    await humanDelay(300, 600);
+                    
+                    // Click at the left side of the element to avoid delete buttons
+                    const box = await element.boundingBox();
+                    if (box) {
+                      // Move mouse to element first (human behavior)
+                      const clickX = box.x + box.width * 0.12;
+                      const clickY = box.y + box.height / 2;
+                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
+                      
+                      // Small delay before clicking
+                      await humanDelay(100, 300);
+                      
+                      // Click at 12% from left edge (delete buttons are usually on the right)
+                      await page.mouse.click(clickX, clickY);
+                      dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
+                    } else {
+                      await element.click();
+                    }
                     clicked = true;
                     dlog(`  ✓ Clicked matching element at index ${i}`);
                     break;
