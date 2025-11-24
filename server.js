@@ -2829,11 +2829,17 @@ async function bookClass({
       await foundInputElement.focus();
       await sleep(200);
       
-      // Use .fill() method like the recording shows - simpler and more reliable
-      dlog(`Filling customer name using .fill(): "${customerName}"`);
-      await foundInputElement.fill(customerName);
+      // Clear the input first
+      await foundInputElement.click({ clickCount: 3 }); // Triple click to select all
+      await page.keyboard.press('Backspace');
+      await sleep(100);
       
-      dlog("✓ Finished filling customer name");
+      // Use type() method - ElementHandle has type() method, not fill()
+      // Using delay: 0 for fast typing like .fill() would do
+      dlog(`Typing customer name using .type(): "${customerName}"`);
+      await foundInputElement.type(customerName, { delay: 0 });
+      
+      dlog("✓ Finished typing customer name");
       
       // Remove network listeners
       page.off('request', requestHandler);
