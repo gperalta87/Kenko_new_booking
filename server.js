@@ -1072,13 +1072,13 @@ async function bookClass({
       dlog("Navigating to login page");
       
       try {
-        // Use networkidle2 to wait for network activity to settle (more reliable than domcontentloaded)
-        // networkidle2 = wait until there are no more than 2 network connections for at least 500ms
+        // Use domcontentloaded for faster initial load, then wait for specific element
+        // This avoids networkidle timeout issues if the site has continuous requests
         await page.goto("https://partners.gokenko.com/login", { 
-          waitUntil: "networkidle2",
+          waitUntil: "domcontentloaded",
           timeout: 30000 
         });
-        dlog("Page loaded (networkidle2)");
+        dlog("Page loaded (domcontentloaded)");
       } catch (navError) {
         dlog(`Navigation error: ${navError?.message}`);
         // Check if page is still valid - frame detachment during navigation is normal
@@ -1092,8 +1092,8 @@ async function bookClass({
         // Continue anyway if we got some page loaded
       }
       
-      // Wait for page to stabilize after navigation
-      await sleep(2000);
+      // Wait for page to stabilize and verify it's still valid
+      await sleep(1000);
       
       // Verify page is still valid (frame detachment during navigation is normal, but page should still be valid)
       let pageUrl;
@@ -1104,12 +1104,26 @@ async function bookClass({
         throw new Error(`Page became invalid after navigation: ${e?.message}`);
       }
       
-      // Additional check: try to evaluate something to ensure the page is interactive
+      // Wait for the gym input field to appear - this confirms the page is fully loaded and interactive
+      // This is more reliable than checking document.readyState
       try {
-        await page.evaluate(() => document.readyState);
-        dlog("Page is interactive");
+        dlog("Waiting for gym input field to confirm page is interactive...");
+        await page.waitForSelector('input[placeholder*="Search"], input[type="text"], input[type="search"]', { 
+          visible: true, 
+          timeout: 10000 
+        });
+        dlog("Gym input field found - page is interactive");
       } catch (e) {
-        throw new Error(`Page is not interactive after navigation: ${e?.message}`);
+        // If we can't find the input, check if page is still valid
+        try {
+          const testUrl = page.url();
+          dlog(`Page URL when input not found: ${testUrl}`);
+          // If we can get the URL, page might still be valid but input not loaded yet
+          // Continue and let the next step handle finding the input
+        } catch (urlError) {
+          throw new Error(`Page became invalid while waiting for input: ${urlError?.message}`);
+        }
+        dlog("⚠ Input field not found yet, but page is still valid - continuing");
       }
       
       // Verify stealth is working - check if webdriver is hidden
