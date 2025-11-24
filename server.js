@@ -2951,40 +2951,92 @@ async function bookClass({
       // First, verify autocomplete dropdown is visible and find clickable customer options
       const dropdownCheck = await page.evaluate(() => {
         // Look for customer options in dropdown - need to find actual clickable elements
-        const allElements = Array.from(document.querySelectorAll('div, li, span, p'));
+        // First, find the autocomplete dropdown container
+        const dropdownContainers = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"], div[class*="popover"]'));
+        const visibleDropdown = dropdownContainers.find(d => {
+          if (d.offsetParent === null) return false;
+          const rect = d.getBoundingClientRect();
+          return rect.width > 100 && rect.height > 50; // Reasonable dropdown size
+        });
+        
         const customerOptions = [];
+        
+        // If we found a dropdown container, search within it
+        const searchRoot = visibleDropdown || document.body;
+        
+        // Look for elements that contain customer names - be very specific
+        const allElements = Array.from(searchRoot.querySelectorAll('div, li, span, p, a'));
         
         for (const el of allElements) {
           if (el.offsetParent === null) continue;
-          const text = (el.textContent || '').trim().toLowerCase();
+          
+          // Get the text content and check if it's a customer name
+          const text = (el.textContent || '').trim();
+          const textLower = text.toLowerCase();
+          
+          // CRITICAL: Look for "Fitpass one" or "Fitpass One" - must be SHORT (customer name, not entire page)
+          // Customer names should be less than 100 characters
+          if (text.length > 100) continue; // Skip huge elements that contain entire page
           
           // Look for "Fitpass" with "One" or "Nadia" - these are the actual customer names
-          if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
-            // Check if this is a clickable option (has cursor-pointer or is in a dropdown item)
-            const isClickable = el.classList.contains('cursor-pointer') || 
-                               el.closest('[class*="dropdown"]') !== null ||
-                               el.closest('[class*="option"]') !== null ||
-                               el.closest('[class*="item"]') !== null ||
-                               el.onclick !== null ||
-                               el.getAttribute('role') === 'option';
+          if (textLower.includes('fitpass') && (textLower.includes('one') || textLower.includes('nadia'))) {
+            // Make sure it's not just "fitpass" alone - must have "one" or "nadia"
+            if (textLower === 'fitpass') continue; // Skip if it's just "fitpass"
             
-            if (isClickable || el.tagName === 'LI' || el.tagName === 'DIV') {
+            // Check if this element is within a dropdown/autocomplete container
+            const isInDropdown = visibleDropdown ? visibleDropdown.contains(el) : 
+                                 el.closest('[class*="dropdown"]') !== null ||
+                                 el.closest('[class*="autocomplete"]') !== null ||
+                                 el.closest('[class*="suggestion"]') !== null ||
+                                 el.closest('[class*="popover"]') !== null ||
+                                 el.closest('[class*="option"]') !== null ||
+                                 el.closest('[class*="item"]') !== null;
+            
+            // Check if it's clickable
+            const isClickable = el.classList.contains('cursor-pointer') || 
+                               el.onclick !== null ||
+                               el.getAttribute('role') === 'option' ||
+                               el.tagName === 'LI' ||
+                               el.tagName === 'A' ||
+                               (el.tagName === 'DIV' && isInDropdown);
+            
+            if (isClickable || isInDropdown) {
               const rect = el.getBoundingClientRect();
-              // Make sure it's actually visible and has reasonable size
-              if (rect.width > 50 && rect.height > 20) {
-                customerOptions.push({
-                  text: el.textContent.trim(),
-                  x: rect.left + rect.width / 2,
-                  y: rect.top + rect.height / 2,
-                  visible: true,
-                  tagName: el.tagName,
-                  className: el.className,
-                  isClickable: isClickable
-                });
+              // Make sure it's actually visible and has reasonable size (not too large)
+              // Customer option should be reasonably sized (not the entire page)
+              if (rect.width > 50 && rect.width < 500 && rect.height > 20 && rect.height < 100) {
+                // Additional check: the text should be primarily the customer name
+                // If the text contains too many other things, it's probably not the right element
+                const textWords = text.split(/\s+/);
+                const hasFitpass = textWords.some(w => w.toLowerCase().includes('fitpass'));
+                const hasOneOrNadia = textWords.some(w => w.toLowerCase().includes('one') || w.toLowerCase().includes('nadia'));
+                
+                if (hasFitpass && hasOneOrNadia) {
+                  customerOptions.push({
+                    text: text.substring(0, 100), // Limit text length for logging
+                    fullText: text,
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2,
+                    visible: true,
+                    tagName: el.tagName,
+                    className: el.className.substring(0, 50), // Limit class name length
+                    isClickable: isClickable,
+                    isInDropdown: isInDropdown,
+                    width: rect.width,
+                    height: rect.height
+                  });
+                }
               }
             }
           }
         }
+        
+        // Sort by size - prefer smaller elements (actual customer options) over large containers
+        customerOptions.sort((a, b) => {
+          const aSize = a.width * a.height;
+          const bSize = b.width * b.height;
+          return aSize - bSize; // Smaller first
+        });
         
         return {
           found: customerOptions.length > 0,
@@ -3006,38 +3058,44 @@ async function bookClass({
       dlog(`✓ Found ${dropdownCheck.count} customer option(s) in dropdown`);
       logToFile(`[CUSTOMER SELECTION] Found ${dropdownCheck.count} customer option(s) in dropdown`);
       
-      // Log the options we found
+      // Log the options we found (limit text length for readability)
       dropdownCheck.options.forEach((opt, i) => {
-        logToFile(`  Option ${i + 1}: "${opt.text}" at (${opt.x}, ${opt.y}), tag: ${opt.tagName}, clickable: ${opt.isClickable}`);
+        const textPreview = opt.text.length > 50 ? opt.text.substring(0, 50) + '...' : opt.text;
+        logToFile(`  Option ${i + 1}: "${textPreview}" at (${opt.x}, ${opt.y}), size: ${opt.width}x${opt.height}, tag: ${opt.tagName}, clickable: ${opt.isClickable}, inDropdown: ${opt.isInDropdown}`);
       });
       
-      // Try multiple methods to click the customer - prioritize clickable elements
+      // Try multiple methods to click the customer - prioritize smaller, clickable elements in dropdown
       let customerSelected = false;
       
-      // Method 1: Try clicking the first clickable option by coordinates (most reliable)
+      // Method 1: Try clicking the smallest option that's in dropdown (most likely to be actual customer option)
       if (dropdownCheck.options.length > 0) {
         try {
-          // Prefer clickable options, but use any if none are marked as clickable
-          const optionToClick = dropdownCheck.options.find(opt => opt.isClickable) || dropdownCheck.options[0];
+          // Prefer: 1) Smallest element, 2) In dropdown, 3) Clickable
+          const optionToClick = dropdownCheck.options.find(opt => opt.isInDropdown && opt.isClickable) ||
+                               dropdownCheck.options.find(opt => opt.isInDropdown) ||
+                               dropdownCheck.options.find(opt => opt.isClickable) ||
+                               dropdownCheck.options[0]; // Fallback to first (smallest after sorting)
           
-          dlog(`[CUSTOMER SELECTION] Method 1: Clicking customer option by coordinates: "${optionToClick.text}" at (${optionToClick.x}, ${optionToClick.y})`);
-          logToFile(`[CUSTOMER SELECTION] Method 1: Clicking "${optionToClick.text}" at (${optionToClick.x}, ${optionToClick.y})`);
+          const textPreview = optionToClick.text.length > 50 ? optionToClick.text.substring(0, 50) + '...' : optionToClick.text;
+          dlog(`[CUSTOMER SELECTION] Method 1: Clicking customer option by coordinates: "${textPreview}" at (${optionToClick.x}, ${optionToClick.y}), size: ${optionToClick.width}x${optionToClick.height}`);
+          logToFile(`[CUSTOMER SELECTION] Method 1: Clicking "${textPreview}" at (${optionToClick.x}, ${optionToClick.y}), size: ${optionToClick.width}x${optionToClick.height}`);
           
           await page.mouse.click(optionToClick.x, optionToClick.y);
           logClick('Select customer', `mouse.click(${optionToClick.x}, ${optionToClick.y})`, 'Puppeteer.mouse.click(coordinates)');
           
           // Wait for selection to register
-          await sleep(500);
+          await sleep(1000);
           
-          // Verify the click worked
+          // Verify the click worked - check if customer was actually selected (not just typed)
           const clickVerified = await page.evaluate(() => {
             // Check if dropdown closed and customer name appears in a selected state
             const inputs = Array.from(document.querySelectorAll('input'));
             for (const input of inputs) {
               if (input.offsetParent === null) continue;
-              const value = (input.value || '').trim().toLowerCase();
-              // If value contains "fitpass" and is more than just "fitpass" (should have "one" or "nadia")
-              if (value.includes('fitpass') && value.length > 7) {
+              const value = (input.value || '').trim();
+              const valueLower = value.toLowerCase();
+              // If value contains "fitpass" and "one" or "nadia" (full customer name, not just "fitpass")
+              if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
                 return true;
               }
             }
@@ -3047,11 +3105,14 @@ async function bookClass({
           if (clickVerified) {
             customerSelected = true;
             dlog(`✓ Customer selected using Method 1 (coordinates)`);
+            logToFile(`✓ Customer selected using Method 1 (coordinates)`);
           } else {
-            dlog(`⚠ Method 1 click may not have registered, trying other methods...`);
+            dlog(`⚠ Method 1 click may not have registered - input still shows just "fitpass", trying other methods...`);
+            logToFile(`⚠ Method 1 click may not have registered - input still shows just "fitpass"`);
           }
         } catch (e) {
           dlog(`Method 1 failed: ${e?.message}`);
+          logToFile(`Method 1 failed: ${e?.message}`);
         }
       }
       
@@ -3065,10 +3126,33 @@ async function bookClass({
             'div.search-container > div > div',
             ':scope >>> div.search-container > div > div'
           ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
-          customerSelected = true;
-          dlog(`✓ Customer selected using Method 2`);
+          
+          // Wait and verify
+          await sleep(1000);
+          const clickVerified = await page.evaluate(() => {
+            const inputs = Array.from(document.querySelectorAll('input'));
+            for (const input of inputs) {
+              if (input.offsetParent === null) continue;
+              const value = (input.value || '').trim();
+              const valueLower = value.toLowerCase();
+              if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+                return true;
+              }
+            }
+            return false;
+          }).catch(() => false);
+          
+          if (clickVerified) {
+            customerSelected = true;
+            dlog(`✓ Customer selected using Method 2`);
+            logToFile(`✓ Customer selected using Method 2`);
+          } else {
+            dlog(`⚠ Method 2 click may not have registered`);
+            logToFile(`⚠ Method 2 click may not have registered`);
+          }
         } catch (e) {
           dlog(`Method 2 failed: ${e?.message}`);
+          logToFile(`Method 2 failed: ${e?.message}`);
         }
       }
       
@@ -3077,26 +3161,76 @@ async function bookClass({
         try {
           dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click...`);
           const clicked = await page.evaluate(() => {
-            const allDivs = Array.from(document.querySelectorAll('div, li'));
+            // Find dropdown container first
+            const dropdownContainers = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"], div[class*="popover"]'));
+            const visibleDropdown = dropdownContainers.find(d => {
+              if (d.offsetParent === null) return false;
+              const rect = d.getBoundingClientRect();
+              return rect.width > 100 && rect.height > 50;
+            });
+            
+            const searchRoot = visibleDropdown || document.body;
+            const allDivs = Array.from(searchRoot.querySelectorAll('div, li'));
+            
+            // Find smallest element with customer name (most likely to be actual option)
+            let bestMatch = null;
+            let smallestSize = Infinity;
+            
             for (const div of allDivs) {
               if (div.offsetParent === null) continue;
-              const text = (div.textContent || '').trim().toLowerCase();
-              if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
-                // Try to click the element
-                div.click();
-                return true;
+              const text = (div.textContent || '').trim();
+              const textLower = text.toLowerCase();
+              
+              // Must be short (customer name, not entire page)
+              if (text.length > 100) continue;
+              
+              if (textLower.includes('fitpass') && (textLower.includes('one') || textLower.includes('nadia'))) {
+                const rect = div.getBoundingClientRect();
+                const size = rect.width * rect.height;
+                
+                // Prefer smaller elements (actual customer options)
+                if (size < smallestSize && rect.width < 500 && rect.height < 100) {
+                  smallestSize = size;
+                  bestMatch = div;
+                }
               }
+            }
+            
+            if (bestMatch) {
+              bestMatch.click();
+              return true;
             }
             return false;
           }).catch(() => false);
           
           if (clicked) {
-            customerSelected = true;
-            logClick('Select customer', 'page.evaluate(element.click())', 'Direct element click');
-            dlog(`✓ Customer selected using Method 3 (direct click)`);
+            await sleep(1000);
+            const clickVerified = await page.evaluate(() => {
+              const inputs = Array.from(document.querySelectorAll('input'));
+              for (const input of inputs) {
+                if (input.offsetParent === null) continue;
+                const value = (input.value || '').trim();
+                const valueLower = value.toLowerCase();
+                if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+                  return true;
+                }
+              }
+              return false;
+            }).catch(() => false);
+            
+            if (clickVerified) {
+              customerSelected = true;
+              logClick('Select customer', 'page.evaluate(element.click())', 'Direct element click');
+              dlog(`✓ Customer selected using Method 3 (direct click)`);
+              logToFile(`✓ Customer selected using Method 3 (direct click)`);
+            } else {
+              dlog(`⚠ Method 3 click may not have registered`);
+              logToFile(`⚠ Method 3 click may not have registered`);
+            }
           }
         } catch (e) {
           dlog(`Method 3 failed: ${e?.message}`);
+          logToFile(`Method 3 failed: ${e?.message}`);
         }
       }
       
@@ -3149,19 +3283,47 @@ async function bookClass({
         
         // Check 2: Look for customer name in a selected/displayed state (not just in input)
         // Check for elements that show the selected customer (usually a div or span near the input)
-        const allElements = Array.from(document.querySelectorAll('div, span, p, li'));
-        for (const el of allElements) {
-          if (el.offsetParent === null) continue;
-          const text = (el.textContent || '').trim().toLowerCase();
-          // Look for full customer name (not just "fitpass")
-          if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
-            // Check if this element is showing a selected customer (not in dropdown)
-            const isSelectedDisplay = !el.closest('[class*="dropdown"]') && 
-                                     !el.closest('[class*="autocomplete"]') &&
-                                     !el.closest('[class*="suggestion"]');
-            if (isSelectedDisplay) {
-              results.customerNameVisible = true;
-              results.customerSelectedIndicator = true; // Found selected customer display
+        // CRITICAL: Must be near the input field and be a reasonable size (not entire page)
+        // Reuse inputs from Check 1
+        const customerInput = inputs.find(input => {
+          if (input.offsetParent === null) return false;
+          const value = (input.value || '').trim().toLowerCase();
+          return value.includes('fitpass');
+        });
+        
+        if (customerInput) {
+          const inputRect = customerInput.getBoundingClientRect();
+          const nearbyElements = Array.from(document.querySelectorAll('div, span, p, li'));
+          
+          for (const el of nearbyElements) {
+            if (el.offsetParent === null) continue;
+            const rect = el.getBoundingClientRect();
+            
+            // Must be near the input (within 200px horizontally, within 100px vertically)
+            const isNearInput = Math.abs(rect.left - inputRect.left) < 200 && 
+                               Math.abs(rect.top - inputRect.top) < 100;
+            
+            if (!isNearInput) continue;
+            
+            const text = (el.textContent || '').trim();
+            const textLower = text.toLowerCase();
+            
+            // Look for full customer name (not just "fitpass") and must be SHORT (actual customer name, not entire page)
+            if (text.length > 100) continue; // Skip huge elements
+            
+            if (textLower.includes('fitpass') && (textLower.includes('one') || textLower.includes('nadia'))) {
+              // Check if this element is showing a selected customer (not in dropdown)
+              const isSelectedDisplay = !el.closest('[class*="dropdown"]') && 
+                                       !el.closest('[class*="autocomplete"]') &&
+                                       !el.closest('[class*="suggestion"]') &&
+                                       !el.closest('[class*="popover"]');
+              
+              // Must be reasonably sized (not entire page)
+              if (isSelectedDisplay && rect.width < 500 && rect.height < 100) {
+                results.customerNameVisible = true;
+                results.customerSelectedIndicator = true; // Found selected customer display near input
+                break; // Found one, stop searching
+              }
             }
           }
         }
