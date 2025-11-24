@@ -1048,103 +1048,36 @@ async function bookClass({
 
   try {
     // Step 1: Navigate to login page
+    // SIMPLIFIED: Back to original working version - no complex checks or waits
     await step("Navigate to login", async () => {
-      // Check if page is still valid before starting
-      try {
-        const testUrl = page.url();
-        dlog(`Page is valid, current URL: ${testUrl}`);
-      } catch (e) {
-        throw new Error(`Page is not valid before navigation: ${e?.message}`);
-      }
-      
       await page.setViewport({ width: 1920, height: 1080 }); // Use realistic viewport
       dlog("Navigating to login page");
-      
-      try {
-        // Use domcontentloaded for faster initial load, then wait for specific element
-        // This avoids networkidle timeout issues if the site has continuous requests
-        await page.goto("https://partners.gokenko.com/login", { 
-          waitUntil: "domcontentloaded",
-          timeout: 30000 
-        });
-        dlog("Page loaded (domcontentloaded)");
-      } catch (navError) {
-        dlog(`Navigation error: ${navError?.message}`);
-        // Check if page is still valid - frame detachment during navigation is normal
-        try {
-          const url = page.url();
-          dlog(`Page URL after navigation error: ${url}`);
-          // If we can get the URL, the page is still valid, continue
-        } catch (e) {
-          throw new Error(`Page became invalid during navigation: ${e?.message}`);
-        }
-        // Continue anyway if we got some page loaded
-      }
-      
-      // Wait for page to stabilize - add human-like delay to avoid detection
-      // Simulate human reading/thinking time (3-5 seconds)
-      await sleep(3000 + Math.random() * 2000);
-      
-      // Simulate human-like mouse movement before checking page
-      try {
-        await simulateHumanBehavior();
-      } catch (e) {
-        dlog(`Human behavior simulation failed (non-critical): ${e?.message}`);
-      }
-      
-      // Don't wait for input field during navigation - let the next step handle it
-      // This avoids potential issues with waitForSelector triggering detection
-      dlog("Navigation complete - will find input field in next step");
+      await page.goto("https://partners.gokenko.com/login", { 
+        waitUntil: "domcontentloaded",
+        timeout: 30000 
+      });
+      dlog("Page loaded");
       
       // Verify stealth is working - check if webdriver is hidden
-      // This is optional - if frame is detached, we'll skip it and continue
-      // Frame detachment during navigation is normal, so we don't throw errors
-      let webdriverCheck = null;
-      try {
-        // Wait a bit before checking to let page stabilize
-        await sleep(500);
-        
-        webdriverCheck = await page.evaluate(() => {
-          return {
-            webdriver: navigator.webdriver,
-            userAgent: navigator.userAgent,
-            plugins: navigator.plugins.length,
-            languages: navigator.languages,
-            chrome: !!window.chrome
-          };
-        });
-        dlog(`Stealth check: webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
-        logToFile(`[STEALTH] webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
-      } catch (evalError) {
-        dlog(`⚠ Stealth check skipped (non-critical): ${evalError?.message}`);
-        logToFile(`⚠ Stealth check skipped: ${evalError?.message}`);
-        // Don't throw error - frame detachment is normal during navigation
-        // The stealth plugin is still active, so we can continue
-      }
+      const webdriverCheck = await page.evaluate(() => {
+        return {
+          webdriver: navigator.webdriver,
+          userAgent: navigator.userAgent,
+          plugins: navigator.plugins.length,
+          languages: navigator.languages,
+          chrome: !!window.chrome
+        };
+      });
+      dlog(`Stealth check: webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
+      logToFile(`[STEALTH] webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
       
-      // Additional wait for page to fully render and scripts to load
-      await sleep(1000);
+      await sleep(1000); // Wait for page to fully render and scripts to load
     });
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
+    // SIMPLIFIED: Back to original working version
     await step("Enter gym location", async () => {
-      // Wait for page to stabilize after navigation - longer wait to avoid detection
-      // Simulate human reading/thinking time
-      await sleep(3000 + Math.random() * 2000);
-      
-      // Simulate human-like mouse movement before interacting
-      try {
-        await simulateHumanBehavior();
-      } catch (e) {
-        dlog(`Human behavior simulation failed (non-critical): ${e?.message}`);
-      }
-      
-      // Don't check page.url() - it might trigger detection
-      // Instead, directly try to find and interact with the input field
-      // This is more resilient to frame detachment
-      
       // Wait for the input field to be visible - use the same selector as reference
-      // Use longer timeout to give page more time to load
       // Reference code uses: input[placeholder*="Search for your business"]
       dlog("Waiting for gym name input field");
       
@@ -1169,7 +1102,7 @@ async function bookClass({
       for (const selector of inputSelectors) {
         try {
           dlog(`Waiting for input with selector: ${selector}`);
-          await page.waitForSelector(selector, { visible: true, timeout: 5000 });
+          await page.waitForSelector(selector, { visible: true, timeout: 2000 });
           const elements = await page.$$(selector);
           
           for (const element of elements) {
