@@ -1092,29 +1092,38 @@ async function bookClass({
         // Continue anyway if we got some page loaded
       }
       
-      // Wait for page to stabilize and verify it's still valid
-      await sleep(1000);
+      // Wait for page to stabilize - add human-like delay to avoid detection
+      // Simulate human reading/thinking time (3-5 seconds)
+      await sleep(3000 + Math.random() * 2000);
       
-      // Verify page is still valid (frame detachment during navigation is normal, but page should still be valid)
-      let pageUrl;
+      // Simulate human-like mouse movement before checking page
       try {
-        pageUrl = page.url();
-        dlog(`Page URL after navigation: ${pageUrl}`);
+        await simulateHumanBehavior();
       } catch (e) {
-        throw new Error(`Page became invalid after navigation: ${e?.message}`);
+        dlog(`Human behavior simulation failed (non-critical): ${e?.message}`);
       }
       
       // Wait for the gym input field to appear - this confirms the page is fully loaded and interactive
-      // This is more reliable than checking document.readyState
+      // Don't check page.url() immediately as it might trigger detection
       try {
         dlog("Waiting for gym input field to confirm page is interactive...");
         await page.waitForSelector('input[placeholder*="Search"], input[type="text"], input[type="search"]', { 
           visible: true, 
-          timeout: 10000 
+          timeout: 15000 
         });
         dlog("Gym input field found - page is interactive");
+        
+        // Now that we know the page is interactive, verify URL
+        try {
+          const pageUrl = page.url();
+          dlog(`Page URL after input found: ${pageUrl}`);
+        } catch (e) {
+          dlog(`⚠ Could not get page URL (non-critical): ${e?.message}`);
+        }
       } catch (e) {
-        // If we can't find the input, check if page is still valid
+        // If we can't find the input, the page might have closed or not loaded properly
+        dlog(`⚠ Input field not found: ${e?.message}`);
+        // Try to check if page is still valid
         try {
           const testUrl = page.url();
           dlog(`Page URL when input not found: ${testUrl}`);
