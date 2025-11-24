@@ -503,11 +503,12 @@ async function bookClass({
       
       // Override permissions
       const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
+      window.navigator.permissions.query = (parameters) => {
+        if (parameters.name === 'notifications') {
+          return Promise.resolve({ state: 'default' });
+        }
+        return originalQuery.call(this, parameters);
+      };
       
       // Override plugins to show realistic plugins
       Object.defineProperty(navigator, 'plugins', {
