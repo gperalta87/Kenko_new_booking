@@ -745,109 +745,153 @@ async function bookClass({
     
     // Override WebGL to prevent VM detection via renderer info
     // VMs often have different WebGL renderer strings
-    const getParameter = WebGLRenderingContext.prototype.getParameter;
-    WebGLRenderingContext.prototype.getParameter = function(parameter) {
-      if (parameter === 37445) { // UNMASKED_VENDOR_WEBGL
-        return 'Intel Inc.'; // Real Mac GPU vendor
+    try {
+      if (typeof WebGLRenderingContext !== 'undefined' && WebGLRenderingContext.prototype) {
+        const getParameter = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) { // UNMASKED_VENDOR_WEBGL
+            return 'Intel Inc.'; // Real Mac GPU vendor
+          }
+          if (parameter === 37446) { // UNMASKED_RENDERER_WEBGL
+            return 'Intel Iris Plus Graphics 640'; // Real Mac GPU renderer
+          }
+          return getParameter.call(this, parameter);
+        };
       }
-      if (parameter === 37446) { // UNMASKED_RENDERER_WEBGL
-        return 'Intel Iris Plus Graphics 640'; // Real Mac GPU renderer
+      
+      // Override WebGL2 similarly
+      if (typeof WebGL2RenderingContext !== 'undefined' && WebGL2RenderingContext.prototype) {
+        const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+        WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+          if (parameter === 37445) {
+            return 'Intel Inc.';
+          }
+          if (parameter === 37446) {
+            return 'Intel Iris Plus Graphics 640';
+          }
+          return getParameter2.call(this, parameter);
+        };
       }
-      return getParameter.call(this, parameter);
-    };
-    
-    // Override WebGL2 similarly
-    if (typeof WebGL2RenderingContext !== 'undefined') {
-      const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
-      WebGL2RenderingContext.prototype.getParameter = function(parameter) {
-        if (parameter === 37445) {
-          return 'Intel Inc.';
-        }
-        if (parameter === 37446) {
-          return 'Intel Iris Plus Graphics 640';
-        }
-        return getParameter2.call(this, parameter);
-      };
+    } catch (e) {
+      // Silently fail if WebGL override doesn't work
     }
     
     // Override Canvas fingerprinting to prevent VM detection
     // VMs often produce different canvas fingerprints
-    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-    HTMLCanvasElement.prototype.toDataURL = function(type) {
-      // Add slight noise to prevent fingerprinting (but keep it consistent)
-      const context = this.getContext('2d');
-      if (context) {
-        const imageData = context.getImageData(0, 0, this.width, this.height);
-        // Add minimal noise (undetectable to human eye but changes fingerprint)
-        for (let i = 0; i < imageData.data.length; i += 4) {
-          if (Math.random() < 0.001) { // Very rare noise
-            imageData.data[i] = Math.min(255, imageData.data[i] + 1);
+    try {
+      if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype) {
+        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function(type) {
+          // Add slight noise to prevent fingerprinting (but keep it consistent)
+          try {
+            const context = this.getContext('2d');
+            if (context) {
+              const imageData = context.getImageData(0, 0, this.width, this.height);
+              // Add minimal noise (undetectable to human eye but changes fingerprint)
+              for (let i = 0; i < imageData.data.length; i += 4) {
+                if (Math.random() < 0.001) { // Very rare noise
+                  imageData.data[i] = Math.min(255, imageData.data[i] + 1);
+                }
+              }
+              context.putImageData(imageData, 0, 0);
+            }
+          } catch (e) {
+            // Ignore canvas manipulation errors
           }
-        }
-        context.putImageData(imageData, 0, 0);
+          return originalToDataURL.apply(this, arguments);
+        };
       }
-      return originalToDataURL.apply(this, arguments);
-    };
+    } catch (e) {
+      // Silently fail if Canvas override doesn't work
+    }
     
     // Override media devices to prevent VM detection
-    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-      const originalEnumerateDevices = navigator.mediaDevices.enumerateDevices;
-      navigator.mediaDevices.enumerateDevices = function() {
-        return originalEnumerateDevices.call(this).then(devices => {
-          // Filter out VM-specific devices or add Mac-like devices
-          return devices.filter(device => {
-            // Remove any device labels that might indicate VM
-            const label = device.label.toLowerCase();
-            return !label.includes('virtual') && !label.includes('vmware') && 
-                   !label.includes('virtualbox') && !label.includes('qemu') &&
-                   !label.includes('docker') && !label.includes('container');
+    try {
+      if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+        const originalEnumerateDevices = navigator.mediaDevices.enumerateDevices;
+        navigator.mediaDevices.enumerateDevices = function() {
+          return originalEnumerateDevices.call(this).then(devices => {
+            // Filter out VM-specific devices or add Mac-like devices
+            return devices.filter(device => {
+              // Remove any device labels that might indicate VM
+              const label = device.label.toLowerCase();
+              return !label.includes('virtual') && !label.includes('vmware') && 
+                     !label.includes('virtualbox') && !label.includes('qemu') &&
+                     !label.includes('docker') && !label.includes('container');
+            });
           });
-        });
-      };
+        };
+      }
+    } catch (e) {
+      // Silently fail if media devices override doesn't work
     }
     
     // Override performance.memory to prevent VM detection (VMs often show different memory)
-    if (performance.memory) {
-      Object.defineProperty(performance, 'memory', {
-        get: () => ({
-          jsHeapSizeLimit: 4294705152, // ~4GB - typical Mac value
-          totalJSHeapSize: 10000000, // ~10MB - realistic
-          usedJSHeapSize: 5000000, // ~5MB - realistic
-        }),
-      });
+    try {
+      if (performance && performance.memory) {
+        Object.defineProperty(performance, 'memory', {
+          get: () => ({
+            jsHeapSizeLimit: 4294705152, // ~4GB - typical Mac value
+            totalJSHeapSize: 10000000, // ~10MB - realistic
+            usedJSHeapSize: 5000000, // ~5MB - realistic
+          }),
+        });
+      }
+    } catch (e) {
+      // Silently fail if performance.memory override doesn't work
     }
     
     // Override navigator.cpuClass (if exists) to prevent VM detection
-    if (navigator.cpuClass !== undefined) {
-      Object.defineProperty(navigator, 'cpuClass', {
-        get: () => 'x86_64', // Mac Intel architecture
-      });
+    try {
+      if (navigator.cpuClass !== undefined) {
+        Object.defineProperty(navigator, 'cpuClass', {
+          get: () => 'x86_64', // Mac Intel architecture
+        });
+      }
+    } catch (e) {
+      // Silently fail if cpuClass override doesn't work
     }
     
     // Override screen orientation to match Mac (no rotation)
-    if (screen.orientation) {
-      Object.defineProperty(screen.orientation, 'angle', {
-        get: () => 0, // Mac screens don't rotate
-      });
-      Object.defineProperty(screen.orientation, 'type', {
-        get: () => 'landscape-primary',
-      });
+    try {
+      if (screen && screen.orientation) {
+        Object.defineProperty(screen.orientation, 'angle', {
+          get: () => 0, // Mac screens don't rotate
+        });
+        Object.defineProperty(screen.orientation, 'type', {
+          get: () => 'landscape-primary',
+        });
+      }
+    } catch (e) {
+      // Silently fail if screen orientation override doesn't work
     }
     
     // Override navigator.doNotTrack to match real browser
-    Object.defineProperty(navigator, 'doNotTrack', {
-      get: () => null, // Real browsers often return null
-    });
+    try {
+      Object.defineProperty(navigator, 'doNotTrack', {
+        get: () => null, // Real browsers often return null
+      });
+    } catch (e) {
+      // Silently fail
+    }
     
     // Override navigator.cookieEnabled (should be true for real browsers)
-    Object.defineProperty(navigator, 'cookieEnabled', {
-      get: () => true,
-    });
+    try {
+      Object.defineProperty(navigator, 'cookieEnabled', {
+        get: () => true,
+      });
+    } catch (e) {
+      // Silently fail
+    }
     
     // Override navigator.onLine to return true (real Macs are usually online)
-    Object.defineProperty(navigator, 'onLine', {
-      get: () => true,
-    });
+    try {
+      Object.defineProperty(navigator, 'onLine', {
+        get: () => true,
+      });
+    } catch (e) {
+      // Silently fail
+    }
     
     // Override permissions to prevent VM detection via permission queries
     const originalPermissionsQuery = navigator.permissions.query;
