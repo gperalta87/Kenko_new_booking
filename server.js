@@ -2825,116 +2825,15 @@ async function bookClass({
       
       // Click and focus the input to ensure it's active
       await foundInputElement.click();
-      await sleep(100);
+      await sleep(200);
       await foundInputElement.focus();
-      await sleep(150);
+      await sleep(200);
       
-      // Trigger focus event to ensure autocomplete is listening
-      await page.evaluate((selector) => {
-        const input = document.querySelector(selector);
-        if (input) {
-          input.focus();
-          input.dispatchEvent(new Event('focus', { bubbles: true }));
-        }
-      }, browserSelector);
+      // Use .fill() method like the recording shows - simpler and more reliable
+      dlog(`Filling customer name using .fill(): "${customerName}"`);
+      await foundInputElement.fill(customerName);
       
-      await sleep(100);
-      
-      // Type character by character with realistic delays and event dispatching
-      dlog(`Typing "${customerSearchValue}" character by character (realistic typing for autocomplete)...`);
-      
-      for (let i = 0; i < customerSearchValue.length; i++) {
-        const char = customerSearchValue[i];
-        const baseDelay = 50 + Math.random() * 50; // 50-100ms between characters
-        
-        // 1. Keydown event
-        await page.evaluate((selector, c) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const keydownEvent = new KeyboardEvent('keydown', { 
-              bubbles: true, 
-              cancelable: true, 
-              key: c,
-              code: `Key${c.toUpperCase()}`
-            });
-            input.dispatchEvent(keydownEvent);
-          }
-        }, browserSelector, char);
-        
-        await sleep(baseDelay * 0.3);
-        
-        // 2. Keypress event
-        await page.evaluate((selector, c) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const keypressEvent = new KeyboardEvent('keypress', { 
-              bubbles: true, 
-              cancelable: true, 
-              key: c,
-              charCode: c.charCodeAt(0)
-            });
-            input.dispatchEvent(keypressEvent);
-          }
-        }, browserSelector, char);
-        
-        await sleep(baseDelay * 0.2);
-        
-        // 3. Actually type the character using keyboard.type()
-        await page.keyboard.type(char, { delay: 0 });
-        
-        await sleep(baseDelay * 0.2);
-        
-        // 4. Input event (fires when value changes)
-        await page.evaluate((selector) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-            Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
-            input.dispatchEvent(inputEvent);
-          }
-        }, browserSelector);
-        
-        await sleep(baseDelay * 0.2);
-        
-        // 5. Composition events (for better autocomplete triggering)
-        if (i === 0) {
-          await page.evaluate((selector) => {
-            const input = document.querySelector(selector);
-            if (input) {
-              input.dispatchEvent(new Event('compositionstart', { bubbles: true }));
-            }
-          }, browserSelector);
-        }
-        
-        if (i === customerSearchValue.length - 1) {
-          await page.evaluate((selector) => {
-            const input = document.querySelector(selector);
-            if (input) {
-              input.dispatchEvent(new Event('compositionend', { bubbles: true }));
-            }
-          }, browserSelector);
-        }
-        
-        await sleep(baseDelay * 0.1);
-        
-        // 6. Keyup event
-        await page.evaluate((selector, c) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const keyupEvent = new KeyboardEvent('keyup', { 
-              bubbles: true, 
-              cancelable: true, 
-              key: c
-            });
-            input.dispatchEvent(keyupEvent);
-          }
-        }, browserSelector, char);
-        
-        // Wait between characters
-        await sleep(baseDelay);
-      }
-      
-      dlog("✓ Finished typing customer name character by character");
+      dlog("✓ Finished filling customer name");
       
       // Remove network listeners
       page.off('request', requestHandler);
@@ -2957,12 +2856,12 @@ async function bookClass({
         });
       }
       
-      // Wait for network requests to complete and autocomplete dropdown to appear (like gym selection)
-      await sleep(3000); // Initial wait
+      // Wait for network requests to complete and autocomplete dropdown to appear
+      await sleep(1500); // Reduced wait since .fill() is faster
       
       // Wait for network idle (autocomplete might fetch from server)
       try {
-        await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => {
+        await page.waitForNetworkIdle({ idleTime: 300, timeout: 3000 }).catch(() => {
           dlog("Network idle wait timed out, continuing...");
         });
       } catch (e) {
@@ -2970,23 +2869,35 @@ async function bookClass({
       }
       
       // Additional wait for autocomplete dropdown to render
-      await sleep(2000);
+      await sleep(1000); // Reduced wait
       
       // Take screenshot to verify autocomplete appeared
       await takeScreenshot('after-customer-search-typing');
       
-      // Verify autocomplete dropdown appeared
+      // Verify autocomplete dropdown appeared - look for span elements in customer-overlay (as shown in recording)
       const autocompleteVisible = await page.evaluate(() => {
-        // Look for common autocomplete dropdown patterns
+        // Look for span elements in div.customer-overlay (as shown in recording)
+        const customerOverlay = document.querySelector('div.customer-overlay');
+        if (customerOverlay) {
+          const spans = Array.from(customerOverlay.querySelectorAll('span'));
+          for (const span of spans) {
+            if (span.offsetParent !== null) {
+              const text = (span.textContent || '').toLowerCase();
+              if (text.includes('fitpass') || text.includes('@test.com') || text.includes('customer')) {
+                return true;
+              }
+            }
+          }
+        }
+        
+        // Fallback: Look for common autocomplete dropdown patterns
         const selectors = [
+          'div.customer-overlay span',
           'div.search-container > div > div',
           '[role="listbox"]',
           '[class*="autocomplete"]',
           '[class*="dropdown"]',
-          '[class*="suggestion"]',
-          'div[class*="search"] > div',
-          'div[class*="result"]',
-          'div[class*="option"]'
+          '[class*="suggestion"]'
         ];
         
         for (const sel of selectors) {
@@ -2994,7 +2905,7 @@ async function bookClass({
           for (const el of elements) {
             if (el.offsetParent !== null) {
               const text = (el.textContent || '').toLowerCase();
-              if (text.includes('fitpass') || text.includes('nadia') || text.includes('customer')) {
+              if (text.includes('fitpass') || text.includes('@test.com') || text.includes('customer')) {
                 return true;
               }
             }
@@ -3011,11 +2922,27 @@ async function bookClass({
         // Wait a bit more and check again
         await sleep(2000);
         
-        // Final check
+        // Final check - look for span elements in customer-overlay
         const finalCheck = await page.evaluate((customerNameParam) => {
-          const allDivs = Array.from(document.querySelectorAll('div'));
+          const customerOverlay = document.querySelector('div.customer-overlay');
           const customerNameLower = customerNameParam.toLowerCase();
           const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
+          
+          // Check span elements in customer-overlay first
+          if (customerOverlay) {
+            const spans = Array.from(customerOverlay.querySelectorAll('span'));
+            for (const span of spans) {
+              if (span.offsetParent !== null) {
+                const text = (span.textContent || '').toLowerCase();
+                if (text.includes('fitpass') && (text.includes(customerNumberWord) || text.includes('@test.com'))) {
+                  return true;
+                }
+              }
+            }
+          }
+          
+          // Fallback: check all divs
+          const allDivs = Array.from(document.querySelectorAll('div'));
           for (const div of allDivs) {
             if (div.offsetParent !== null) {
               const text = (div.textContent || '').toLowerCase();
@@ -3031,12 +2958,8 @@ async function bookClass({
           dlog("✓ Autocomplete dropdown found on final check");
         } else {
           logToFile("❌ ERROR: Autocomplete dropdown not found even after extended wait");
-          // If autocomplete not found, try next customer
-          if (customerNumber < MAX_CUSTOMER_RETRIES) {
-            continue;
-          } else {
-            throw new Error(`Autocomplete dropdown not found for any customer after ${MAX_CUSTOMER_RETRIES} attempts`);
-          }
+          // Don't retry - autocomplete not appearing is a different issue, not a customer availability issue
+          throw new Error(`Autocomplete dropdown not found - this is not a customer availability issue`);
         }
       }
       
@@ -3053,28 +2976,27 @@ async function bookClass({
       
       // First, verify autocomplete dropdown is visible and find clickable customer options
       const dropdownCheck = await page.evaluate((customerNameParam) => {
-        // Look for customer options in dropdown - need to find actual clickable elements
-        // First, find the autocomplete dropdown container
-        const dropdownContainers = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"], div[class*="popover"]'));
-        const visibleDropdown = dropdownContainers.find(d => {
-          if (d.offsetParent === null) return false;
-          const rect = d.getBoundingClientRect();
-          return rect.width > 100 && rect.height > 50; // Reasonable dropdown size
-        });
+        // Look for customer options in dropdown - based on recording, they are span elements inside div.customer-overlay
+        // First, find the customer overlay container (as shown in recording)
+        const customerOverlay = document.querySelector('div.customer-overlay');
+        const searchRoot = customerOverlay || document.body;
         
         const customerOptions = [];
-        
-        // If we found a dropdown container, search within it
-        const searchRoot = visibleDropdown || document.body;
-        
-        // Look for elements that contain customer names - be very specific
-        const allElements = Array.from(searchRoot.querySelectorAll('div, li, span, p, a'));
         
         // Extract the number part from customer name (e.g., "one", "two", "three", etc.)
         const customerNameLower = customerNameParam.toLowerCase();
         const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
         
-        for (const el of allElements) {
+        // Priority 1: Look for span elements inside div.customer-overlay (as shown in recording)
+        const spanElements = Array.from(searchRoot.querySelectorAll('div.customer-overlay span, span'));
+        
+        // Priority 2: Also check other elements as fallback
+        const allElements = Array.from(searchRoot.querySelectorAll('div, li, span, p, a'));
+        
+        // Combine and prioritize spans
+        const elementsToCheck = [...spanElements, ...allElements.filter(el => !spanElements.includes(el))];
+        
+        for (const el of elementsToCheck) {
           if (el.offsetParent === null) continue;
           
           // Get the text content and check if it's a customer name
@@ -3082,63 +3004,71 @@ async function bookClass({
           const textLower = text.toLowerCase();
           
           // CRITICAL: Look for the current customer name (e.g., "Fitpass One", "Fitpass Two", etc.)
-          // Customer names should be less than 100 characters
-          if (text.length > 100) continue; // Skip huge elements that contain entire page
+          // Customer names should be less than 200 characters (may include email like "fitpass1@test.com  |")
+          if (text.length > 200) continue; // Skip huge elements that contain entire page
           
-          if (textLower.includes('fitpass') && textLower.includes(customerNumberWord)) {
-            // Make sure it's not just "fitpass" alone - must have the number word
+          // Check if text contains fitpass and the number word (or email pattern)
+          const hasFitpass = textLower.includes('fitpass');
+          const hasNumberWord = textLower.includes(customerNumberWord);
+          const hasEmailPattern = textLower.includes('@test.com') || textLower.includes('@'); // Recording shows email in text
+          
+          if (hasFitpass && (hasNumberWord || hasEmailPattern)) {
+            // Make sure it's not just "fitpass" alone - must have the number word or email
             if (textLower === 'fitpass') continue; // Skip if it's just "fitpass"
             
-            // Check if this element is within a dropdown/autocomplete container
-            const isInDropdown = visibleDropdown ? visibleDropdown.contains(el) : 
-                                 el.closest('[class*="dropdown"]') !== null ||
-                                 el.closest('[class*="autocomplete"]') !== null ||
-                                 el.closest('[class*="suggestion"]') !== null ||
-                                 el.closest('[class*="popover"]') !== null ||
-                                 el.closest('[class*="option"]') !== null ||
-                                 el.closest('[class*="item"]') !== null;
+            // Check if this element is within customer overlay (as shown in recording)
+            const isInCustomerOverlay = customerOverlay ? customerOverlay.contains(el) : 
+                                       el.closest('div.customer-overlay') !== null ||
+                                       el.closest('[class*="dropdown"]') !== null ||
+                                       el.closest('[class*="autocomplete"]') !== null ||
+                                       el.closest('[class*="suggestion"]') !== null ||
+                                       el.closest('[class*="popover"]') !== null ||
+                                       el.closest('[class*="option"]') !== null ||
+                                       el.closest('[class*="item"]') !== null;
             
-            // Check if it's clickable
+            // Check if it's clickable - SPAN elements are clickable (as shown in recording)
             const isClickable = el.classList.contains('cursor-pointer') || 
                                el.onclick !== null ||
                                el.getAttribute('role') === 'option' ||
                                el.tagName === 'LI' ||
                                el.tagName === 'A' ||
-                               (el.tagName === 'DIV' && isInDropdown);
+                               el.tagName === 'SPAN' || // SPAN elements are clickable (from recording)
+                               (el.tagName === 'DIV' && isInCustomerOverlay);
             
-            if (isClickable || isInDropdown) {
+            if (isClickable || isInCustomerOverlay) {
               const rect = el.getBoundingClientRect();
               // Make sure it's actually visible and has reasonable size (not too large)
               // Customer option should be reasonably sized (not the entire page)
-              if (rect.width > 50 && rect.width < 500 && rect.height > 20 && rect.height < 100) {
-                // Additional check: the text should be primarily the customer name
-                // If the text contains too many other things, it's probably not the right element
-                const textWords = text.split(/\s+/);
-                const hasFitpass = textWords.some(w => w.toLowerCase().includes('fitpass'));
-                const hasOneOrNadia = textWords.some(w => w.toLowerCase().includes('one') || w.toLowerCase().includes('nadia'));
-                
-                if (hasFitpass && hasOneOrNadia) {
-                  customerOptions.push({
-                    text: text.substring(0, 100), // Limit text length for logging
-                    fullText: text,
-                    x: rect.left + rect.width / 2,
-                    y: rect.top + rect.height / 2,
-                    visible: true,
-                    tagName: el.tagName,
-                    className: el.className.substring(0, 50), // Limit class name length
-                    isClickable: isClickable,
-                    isInDropdown: isInDropdown,
-                    width: rect.width,
-                    height: rect.height
-                  });
-                }
+              if (rect.width > 50 && rect.width < 500 && rect.height > 10 && rect.height < 100) {
+                customerOptions.push({
+                  text: text.substring(0, 150), // Limit text length for logging (may include email)
+                  fullText: text,
+                  x: rect.left + rect.width / 2,
+                  y: rect.top + rect.height / 2,
+                  visible: true,
+                  tagName: el.tagName,
+                  className: el.className.substring(0, 50), // Limit class name length
+                  isClickable: isClickable,
+                  isInDropdown: isInCustomerOverlay,
+                  width: rect.width,
+                  height: rect.height,
+                  isSpan: el.tagName === 'SPAN', // Prioritize SPAN elements
+                  isInCustomerOverlay: isInCustomerOverlay
+                });
               }
             }
           }
         }
         
-        // Sort by size - prefer smaller elements (actual customer options) over large containers
+        // Sort by priority: 1) SPAN elements, 2) In customer-overlay, 3) Smaller size
         customerOptions.sort((a, b) => {
+          // Prioritize SPAN elements (as shown in recording)
+          if (a.isSpan && !b.isSpan) return -1;
+          if (!a.isSpan && b.isSpan) return 1;
+          // Prioritize elements in customer-overlay
+          if (a.isInCustomerOverlay && !b.isInCustomerOverlay) return -1;
+          if (!a.isInCustomerOverlay && b.isInCustomerOverlay) return 1;
+          // Then by size - prefer smaller elements
           const aSize = a.width * a.height;
           const bSize = b.width * b.height;
           return aSize - bSize; // Smaller first
@@ -3152,25 +3082,39 @@ async function bookClass({
       }, customerName).catch(() => ({ found: false, count: 0, options: [] }));
       
       if (!dropdownCheck.found) {
-        logToFile(`❌ ERROR: Customer dropdown options not found for "${customerName}"! Cannot select customer.`);
-        dlog(`❌ ERROR: Customer dropdown options not found for "${customerName}"! Cannot select customer.`);
+        logToFile(`❌ ERROR: Customer "${customerName}" not found in dropdown! Cannot select customer.`);
+        dlog(`❌ ERROR: Customer "${customerName}" not found in dropdown! Cannot select customer.`);
         
         // Take screenshot for debugging
         await takeScreenshot(`customer-dropdown-not-found-${customerNumber}`);
         
-        // If this is not the last attempt, try next customer
+        // Don't retry - customer not found is unproductive, throw error
+        throw new Error(`Customer "${customerName}" not found in dropdown - this is not a clickability issue`);
+      }
+      
+      dlog(`✓ Found ${dropdownCheck.count} customer option(s) in dropdown`);
+      logToFile(`[CUSTOMER SELECTION] Found ${dropdownCheck.count} customer option(s) in dropdown`);
+      
+      // Check if any of the found options are clickable
+      const hasClickableOption = dropdownCheck.options.some(opt => opt.isClickable);
+      
+      if (!hasClickableOption) {
+        logToFile(`⚠ Customer "${customerName}" found in dropdown but NOT clickable! Trying next customer.`);
+        dlog(`⚠ Customer "${customerName}" found in dropdown but NOT clickable! Trying next customer.`);
+        
+        // Take screenshot for debugging
+        await takeScreenshot(`customer-not-clickable-${customerNumber}`);
+        
+        // Retry with next customer - this is the case we want to retry for
         if (customerNumber < MAX_CUSTOMER_RETRIES) {
           logToFile(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
           dlog(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
           continue; // Try next customer
         } else {
           // Last attempt failed
-          throw new Error(`Customer dropdown not visible for any customer (1-${MAX_CUSTOMER_RETRIES}). Autocomplete may not have appeared.`);
+          throw new Error(`Customer "${customerName}" found but not clickable and no more customers to try (1-${MAX_CUSTOMER_RETRIES})`);
         }
       }
-      
-      dlog(`✓ Found ${dropdownCheck.count} customer option(s) in dropdown`);
-      logToFile(`[CUSTOMER SELECTION] Found ${dropdownCheck.count} customer option(s) in dropdown`);
       
       // Log the options we found (limit text length for readability)
       dropdownCheck.options.forEach((opt, i) => {
@@ -3232,16 +3176,18 @@ async function bookClass({
         }
       }
       
-      // Method 2: Try using clickElement with text selector (fallback)
+      // Method 2: Try using clickElement with selectors from recording (fallback)
       if (!customerSelected) {
         try {
-          dlog(`[CUSTOMER SELECTION] Method 2: Trying text-based selector...`);
+          dlog(`[CUSTOMER SELECTION] Method 2: Trying selectors from recording...`);
+          // Use selectors from recording: div.customer-overlay span
           await clickElement(page, [
+            'div.customer-overlay span',
+            `::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div/div[2]/div[2]/span)`,
+            ':scope >>> div.customer-overlay span',
             `::-p-text(${customerName})`,
-            `::-p-text(Fitpass)`,
-            'div.search-container > div > div',
-            ':scope >>> div.search-container > div > div'
-          ], { offset: { x: 201, y: 11 }, location: 'Select customer', debug: DEBUG });
+            `::-p-text(fitpass)`
+          ], { offset: { x: 76, y: 15 }, location: 'Select customer', debug: DEBUG }); // Offset from recording
           
           // Wait and verify
           await sleep(1000);
@@ -3277,42 +3223,49 @@ async function bookClass({
       // Method 3: Try direct element click via page.evaluate (last resort)
       if (!customerSelected) {
         try {
-          dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click...`);
+          dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click (prioritizing SPAN elements)...`);
           const clicked = await page.evaluate((customerNameParam) => {
-            // Find dropdown container first
-            const dropdownContainers = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"], div[class*="popover"]'));
-            const visibleDropdown = dropdownContainers.find(d => {
-              if (d.offsetParent === null) return false;
-              const rect = d.getBoundingClientRect();
-              return rect.width > 100 && rect.height > 50;
-            });
+            // Find customer overlay container (as shown in recording)
+            const customerOverlay = document.querySelector('div.customer-overlay');
+            const searchRoot = customerOverlay || document.body;
             
-            const searchRoot = visibleDropdown || document.body;
-            const allDivs = Array.from(searchRoot.querySelectorAll('div, li'));
+            // Prioritize SPAN elements (as shown in recording)
+            const spanElements = Array.from(searchRoot.querySelectorAll('div.customer-overlay span, span'));
+            const allElements = Array.from(searchRoot.querySelectorAll('div, li, span'));
+            const elementsToCheck = [...spanElements, ...allElements.filter(el => !spanElements.includes(el))];
             
-            // Find smallest element with customer name (most likely to be actual option)
+            // Find best match with customer name
             let bestMatch = null;
-            let smallestSize = Infinity;
+            let bestScore = -1;
             
             const customerNameLower = customerNameParam.toLowerCase();
             const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
             
-            for (const div of allDivs) {
-              if (div.offsetParent === null) continue;
-              const text = (div.textContent || '').trim();
+            for (const el of elementsToCheck) {
+              if (el.offsetParent === null) continue;
+              const text = (el.textContent || '').trim();
               const textLower = text.toLowerCase();
               
-              // Must be short (customer name, not entire page)
-              if (text.length > 100) continue;
+              // Must be reasonable length (may include email)
+              if (text.length > 200) continue;
               
-              if (textLower.includes('fitpass') && textLower.includes(customerNumberWord)) {
-                const rect = div.getBoundingClientRect();
+              const hasFitpass = textLower.includes('fitpass');
+              const hasNumberWord = textLower.includes(customerNumberWord);
+              const hasEmailPattern = textLower.includes('@test.com') || textLower.includes('@');
+              
+              if (hasFitpass && (hasNumberWord || hasEmailPattern)) {
+                const rect = el.getBoundingClientRect();
                 const size = rect.width * rect.height;
                 
-                // Prefer smaller elements (actual customer options)
-                if (size < smallestSize && rect.width < 500 && rect.height < 100) {
-                  smallestSize = size;
-                  bestMatch = div;
+                // Score: prioritize SPAN, then customer-overlay, then smaller size
+                let score = 0;
+                if (el.tagName === 'SPAN') score += 1000;
+                if (customerOverlay && customerOverlay.contains(el)) score += 500;
+                score += 1000 / (size + 1); // Smaller is better
+                
+                if (rect.width < 500 && rect.height < 100 && score > bestScore) {
+                  bestScore = score;
+                  bestMatch = el;
                 }
               }
             }
@@ -3361,15 +3314,9 @@ async function bookClass({
         logToFile(`❌ ERROR: Failed to select customer "${customerName}" using all methods!`);
         await takeScreenshot(`customer-selection-failed-${customerNumber}`);
         
-        // If this is not the last attempt, try next customer
-        if (customerNumber < MAX_CUSTOMER_RETRIES) {
-          logToFile(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
-          dlog(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
-          continue; // Try next customer
-        } else {
-          // Last attempt failed
-          throw new Error(`Failed to select any customer (1-${MAX_CUSTOMER_RETRIES}) - all click methods failed`);
-        }
+        // Don't retry - if customer was found and clickable but clicking failed, that's a different issue
+        // We only retry when customer is found but NOT clickable (handled earlier)
+        throw new Error(`Failed to select customer "${customerName}" - all click methods failed. Customer was found but clicking failed.`);
       }
       
       // Wait a bit for selection to register
@@ -3527,15 +3474,8 @@ async function bookClass({
         // Take screenshot of failure state
         await takeScreenshot(`customer-selection-validation-failed-${customerNumber}`);
         
-        // If this is not the last attempt, try next customer
-        if (customerNumber < MAX_CUSTOMER_RETRIES) {
-          logToFile(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
-          dlog(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
-          continue; // Try next customer
-        } else {
-          // Last attempt failed
-          throw new Error(`Customer selection validation failed for all customers (1-${MAX_CUSTOMER_RETRIES}). Last attempt: "${customerName}", Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}", BOOK button visible: ${customerSelectedCheck.bookButtonVisible}`);
-        }
+        // Don't retry - validation failure means clicking didn't work properly, not a clickability issue
+        throw new Error(`Customer selection validation failed for "${customerName}" - customer was clicked but not properly selected. Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}", BOOK button visible: ${customerSelectedCheck.bookButtonVisible}`);
       }
       
       // Success! Customer was selected
@@ -3546,9 +3486,6 @@ async function bookClass({
       
       // Take screenshot after successful validation
       await takeScreenshot(`after-customer-selection-validated-${customerName.replace(/\s+/g, '-')}`);
-      
-      // Break out of retry loop - we found a working customer
-      break;
       
       // Check if booking was automatically triggered
       const autoBookingCheck = await page.evaluate(() => {
@@ -3579,6 +3516,9 @@ async function bookClass({
         console.error(warningMsg);
       }
       await sleep(500); // Optimized: reduced from 1000ms
+      
+      // Break out of retry loop - we found a working customer
+      break;
       } // End of customer selection logic (inside retry loop)
       
       // Check if we successfully selected a customer
