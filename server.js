@@ -442,7 +442,7 @@ async function bookClass({
     delete process.env.DBUS_SESSION_BUS_ADDRESS;
     delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
     
-    // Add stealth arguments to bypass anti-scraping detection
+    // Add stealth arguments to bypass anti-scraping detection AND VM detection
     // These are CRITICAL for bypassing Kenko's anti-scraping measures
     const stealthArgs = [
       '--disable-blink-features=AutomationControlled', // Most important - removes automation flag!
@@ -450,6 +450,12 @@ async function bookClass({
       '--disable-features=IsolateOrigins,site-per-process',
       '--disable-site-isolation-trials',
       '--disable-features=VizDisplayCompositor',
+      // VM detection prevention flags
+      '--disable-dev-shm-usage', // Prevents /dev/shm detection (common VM indicator)
+      '--disable-software-rasterizer', // Use hardware acceleration (real Macs have this)
+      '--use-gl=swiftshader', // But fallback to software if needed (already in launchArgs)
+      '--enable-features=NetworkService,NetworkServiceInProcess', // Real browser features
+      '--disable-features=AudioServiceOutOfProcess', // Keep audio in-process (real Mac behavior)
     ];
     
     browser = await puppeteer.launch({
@@ -570,22 +576,65 @@ async function bookClass({
   });
   
   // Override navigator properties to match local Chrome (not headless)
-  // Enhanced fingerprinting to appear as real browser session
+  // Enhanced fingerprinting to appear as real browser session on a real Mac (not VM)
   await page.evaluateOnNewDocument(() => {
-    // Override platform to match local
+    // Override platform to match local Mac
     Object.defineProperty(navigator, 'platform', {
       get: () => 'MacIntel',
     });
     
-    // Override hardwareConcurrency (headless often shows different values)
+    // Override hardwareConcurrency to match real Mac (VMs often show different values)
     Object.defineProperty(navigator, 'hardwareConcurrency', {
-      get: () => 8, // Common Mac value
+      get: () => 8, // Common Mac value (not typical VM values like 2 or 4)
     });
     
-    // Override deviceMemory
+    // Override deviceMemory to match real Mac (VMs often show lower values)
     Object.defineProperty(navigator, 'deviceMemory', {
-      get: () => 8,
+      get: () => 8, // Real Mac typically has 8GB+ (VMs often show 2-4GB)
     });
+    
+    // Override maxTouchPoints (Macs don't have touch, VMs might report different)
+    Object.defineProperty(navigator, 'maxTouchPoints', {
+      get: () => 0, // Mac doesn't have touch
+    });
+    
+    // Override screen properties to match real Mac (prevent VM detection)
+    Object.defineProperty(screen, 'width', {
+      get: () => 1920,
+    });
+    Object.defineProperty(screen, 'height', {
+      get: () => 1080,
+    });
+    Object.defineProperty(screen, 'availWidth', {
+      get: () => 1920,
+    });
+    Object.defineProperty(screen, 'availHeight', {
+      get: () => 1055, // Account for menu bar
+    });
+    Object.defineProperty(screen, 'colorDepth', {
+      get: () => 24, // Real Mac color depth
+    });
+    Object.defineProperty(screen, 'pixelDepth', {
+      get: () => 24,
+    });
+    
+    // Override timezone to match Mac (VMs often use UTC)
+    // This is critical - VMs are often detected by timezone mismatches
+    const originalGetTimezoneOffset = Date.prototype.getTimezoneOffset;
+    Date.prototype.getTimezoneOffset = function() {
+      // Return offset for US timezone (e.g., EST/EDT)
+      // This makes Railway look like it's running in US timezone like a real Mac
+      return 300; // EST offset (UTC-5) - adjust if needed for your location
+    };
+    
+    // Override Intl.DateTimeFormat to return Mac-like timezone
+    const originalDateTimeFormat = Intl.DateTimeFormat;
+    Intl.DateTimeFormat = function(...args) {
+      if (args.length === 0 || (args.length === 1 && typeof args[0] === 'string')) {
+        return new originalDateTimeFormat('en-US', { timeZone: 'America/New_York' });
+      }
+      return new originalDateTimeFormat(...args);
+    };
     
     // Override webdriver to ensure it's undefined (stealth plugin should do this, but double-check)
     Object.defineProperty(navigator, 'webdriver', {
@@ -712,7 +761,7 @@ async function bookClass({
         originalQuery(parameters)
     );
     
-    // Override getBattery to return realistic values
+    // Override getBattery to return realistic values (Mac-like)
     if (navigator.getBattery) {
       navigator.getBattery = () => Promise.resolve({
         charging: true,
@@ -725,6 +774,125 @@ async function bookClass({
         onlevelchange: null
       });
     }
+    
+    // Override WebGL to prevent VM detection via renderer info
+    // VMs often have different WebGL renderer strings
+    const getParameter = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(parameter) {
+      if (parameter === 37445) { // UNMASKED_VENDOR_WEBGL
+        return 'Intel Inc.'; // Real Mac GPU vendor
+      }
+      if (parameter === 37446) { // UNMASKED_RENDERER_WEBGL
+        return 'Intel Iris Plus Graphics 640'; // Real Mac GPU renderer
+      }
+      return getParameter.call(this, parameter);
+    };
+    
+    // Override WebGL2 similarly
+    if (typeof WebGL2RenderingContext !== 'undefined') {
+      const getParameter2 = WebGL2RenderingContext.prototype.getParameter;
+      WebGL2RenderingContext.prototype.getParameter = function(parameter) {
+        if (parameter === 37445) {
+          return 'Intel Inc.';
+        }
+        if (parameter === 37446) {
+          return 'Intel Iris Plus Graphics 640';
+        }
+        return getParameter2.call(this, parameter);
+      };
+    }
+    
+    // Override Canvas fingerprinting to prevent VM detection
+    // VMs often produce different canvas fingerprints
+    const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
+    HTMLCanvasElement.prototype.toDataURL = function(type) {
+      // Add slight noise to prevent fingerprinting (but keep it consistent)
+      const context = this.getContext('2d');
+      if (context) {
+        const imageData = context.getImageData(0, 0, this.width, this.height);
+        // Add minimal noise (undetectable to human eye but changes fingerprint)
+        for (let i = 0; i < imageData.data.length; i += 4) {
+          if (Math.random() < 0.001) { // Very rare noise
+            imageData.data[i] = Math.min(255, imageData.data[i] + 1);
+          }
+        }
+        context.putImageData(imageData, 0, 0);
+      }
+      return originalToDataURL.apply(this, arguments);
+    };
+    
+    // Override media devices to prevent VM detection
+    if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+      const originalEnumerateDevices = navigator.mediaDevices.enumerateDevices;
+      navigator.mediaDevices.enumerateDevices = function() {
+        return originalEnumerateDevices.call(this).then(devices => {
+          // Filter out VM-specific devices or add Mac-like devices
+          return devices.filter(device => {
+            // Remove any device labels that might indicate VM
+            const label = device.label.toLowerCase();
+            return !label.includes('virtual') && !label.includes('vmware') && 
+                   !label.includes('virtualbox') && !label.includes('qemu') &&
+                   !label.includes('docker') && !label.includes('container');
+          });
+        });
+      };
+    }
+    
+    // Override performance.memory to prevent VM detection (VMs often show different memory)
+    if (performance.memory) {
+      Object.defineProperty(performance, 'memory', {
+        get: () => ({
+          jsHeapSizeLimit: 4294705152, // ~4GB - typical Mac value
+          totalJSHeapSize: 10000000, // ~10MB - realistic
+          usedJSHeapSize: 5000000, // ~5MB - realistic
+        }),
+      });
+    }
+    
+    // Override navigator.cpuClass (if exists) to prevent VM detection
+    if (navigator.cpuClass !== undefined) {
+      Object.defineProperty(navigator, 'cpuClass', {
+        get: () => 'x86_64', // Mac Intel architecture
+      });
+    }
+    
+    // Override screen orientation to match Mac (no rotation)
+    if (screen.orientation) {
+      Object.defineProperty(screen.orientation, 'angle', {
+        get: () => 0, // Mac screens don't rotate
+      });
+      Object.defineProperty(screen.orientation, 'type', {
+        get: () => 'landscape-primary',
+      });
+    }
+    
+    // Override navigator.doNotTrack to match real browser
+    Object.defineProperty(navigator, 'doNotTrack', {
+      get: () => null, // Real browsers often return null
+    });
+    
+    // Override navigator.cookieEnabled (should be true for real browsers)
+    Object.defineProperty(navigator, 'cookieEnabled', {
+      get: () => true,
+    });
+    
+    // Override navigator.onLine to return true (real Macs are usually online)
+    Object.defineProperty(navigator, 'onLine', {
+      get: () => true,
+    });
+    
+    // Override permissions to prevent VM detection via permission queries
+    const originalPermissionsQuery = navigator.permissions.query;
+    navigator.permissions.query = function(parameters) {
+      // Return realistic permission states for Mac
+      if (parameters.name === 'notifications') {
+        return Promise.resolve({ state: 'default' });
+      }
+      if (parameters.name === 'geolocation') {
+        return Promise.resolve({ state: 'prompt' });
+      }
+      return originalPermissionsQuery.call(this, parameters);
+    };
   });
   
   // Add human-like mouse movements and scrolling behavior
