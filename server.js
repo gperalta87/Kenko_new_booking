@@ -515,6 +515,7 @@ async function bookClass({
   });
   
   // Override navigator properties to match local Chrome (not headless)
+  // Enhanced fingerprinting to appear as real browser session
   await page.evaluateOnNewDocument(() => {
     // Override platform to match local
     Object.defineProperty(navigator, 'platform', {
@@ -535,7 +536,78 @@ async function bookClass({
     Object.defineProperty(navigator, 'webdriver', {
       get: () => undefined,
     });
+    
+    // Override languages to match real browser
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+    });
+    
+    // Override vendor to match Chrome
+    Object.defineProperty(navigator, 'vendor', {
+      get: () => 'Google Inc.',
+    });
+    
+    // Override appVersion to match Chrome
+    Object.defineProperty(navigator, 'appVersion', {
+      get: () => '5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    });
+    
+    // Override connection properties (if available)
+    if (navigator.connection) {
+      Object.defineProperty(navigator.connection, 'rtt', {
+        get: () => 50,
+      });
+      Object.defineProperty(navigator.connection, 'downlink', {
+        get: () => 10,
+      });
+      Object.defineProperty(navigator.connection, 'effectiveType', {
+        get: () => '4g',
+      });
+    }
+    
+    // Add Chrome-specific properties
+    window.chrome = {
+      runtime: {},
+      loadTimes: function() {},
+      csi: function() {},
+      app: {}
+    };
+    
+    // Override permissions API to return realistic values
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+    );
   });
+  
+  // Add human-like mouse movements and scrolling behavior
+  // This makes the session look more realistic
+  const simulateHumanBehavior = async () => {
+    try {
+      // Random mouse movements (subtle, not too obvious)
+      const viewport = page.viewport();
+      if (viewport) {
+        const moves = Math.floor(Math.random() * 3) + 1; // 1-3 moves
+        for (let i = 0; i < moves; i++) {
+          const x = Math.random() * viewport.width;
+          const y = Math.random() * viewport.height;
+          await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 5) + 3 });
+          await sleep(Math.random() * 200 + 100);
+        }
+      }
+      
+      // Random subtle scrolling
+      const scrollAmount = Math.floor(Math.random() * 200) + 50;
+      await page.evaluate((amount) => {
+        window.scrollBy(0, amount);
+      }, scrollAmount);
+      await sleep(Math.random() * 300 + 200);
+    } catch (e) {
+      // Ignore errors - this is just for realism
+    }
+  };
   
   // Override permissions (for both domains)
   const context = browser.defaultBrowserContext();
@@ -1425,6 +1497,11 @@ async function bookClass({
         // Wait a bit longer and try to recover
         await sleep(1000);
       }
+      
+      // Simulate human behavior after login (makes session look more realistic)
+      dlog(`Simulating human behavior after login...`);
+      await simulateHumanBehavior();
+      await sleep(1000 + Math.random() * 1000); // Random delay 1000-2000ms
       
       // Handle potential password re-entry (as in recorded session)
       await sleep(500); // Optimized: reduced from 1000ms
@@ -3042,15 +3119,20 @@ async function bookClass({
       page.on('request', requestHandler);
       page.on('response', responseHandler);
       
+      // Simulate human behavior before typing (makes session look more realistic)
+      dlog(`Simulating human behavior before customer search...`);
+      await simulateHumanBehavior();
+      await sleep(1000 + Math.random() * 1000); // Random delay 1000-2000ms (longer to look more human)
+      
       // SIMPLIFIED APPROACH: Use Locator API .fill() method (like user's Puppeteer recording)
       // This matches what works locally - fast and reliable
       dlog(`Using Locator API .fill() method to input customer name "${customerName}" (matching local behavior)...`);
       
-      // Ensure input is focused and ready
+      // Ensure input is focused and ready (with human-like delays)
       await foundInputElement.click();
-      await sleep(200);
+      await sleep(300 + Math.random() * 300); // Random delay 300-600ms
       await foundInputElement.focus();
-      await sleep(200);
+      await sleep(300 + Math.random() * 300); // Random delay 300-600ms
       
       // Clear any existing value first
       await foundInputElement.click({ clickCount: 3 });
