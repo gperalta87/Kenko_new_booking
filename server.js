@@ -1170,13 +1170,29 @@ async function bookClass({
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
     await step("Enter gym location", async () => {
+      // Wait a bit before checking page validity - let page stabilize
+      await sleep(1000);
+      
       // CRITICAL: Verify page is still valid before proceeding
       // Frames may detach after navigation, so we need to check
-      try {
-        const currentUrl = page.url();
-        dlog(`Page is valid, current URL: ${currentUrl}`);
-      } catch (e) {
-        throw new Error(`Page frame detached before gym selection: ${e?.message}`);
+      // But don't throw error immediately - try to wait for page to stabilize
+      let pageValid = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const currentUrl = page.url();
+          dlog(`Page is valid (attempt ${attempt + 1}), current URL: ${currentUrl}`);
+          pageValid = true;
+          break;
+        } catch (e) {
+          dlog(`Page check failed (attempt ${attempt + 1}): ${e?.message}`);
+          if (attempt < 2) {
+            await sleep(1000); // Wait and retry
+          }
+        }
+      }
+      
+      if (!pageValid) {
+        throw new Error(`Page frame detached before gym selection - page closed or not accessible`);
       }
       
       // Wait for the input field to be visible - use the same selector as reference
