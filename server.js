@@ -2823,25 +2823,81 @@ async function bookClass({
       page.on('request', requestHandler);
       page.on('response', responseHandler);
       
-      // Click and focus the input to ensure it's active
-      await foundInputElement.click();
-      await sleep(200);
-      await foundInputElement.focus();
-      await sleep(200);
+      // Use Locator API with .fill() like the recording shows - this properly triggers autocomplete
+      dlog(`Filling customer name using Locator API .fill(): "${customerName}"`);
+      try {
+        // Use the Locator API which supports .fill() method (as shown in recording)
+        const locator = page.locator(foundInputSelector);
+        await locator.fill(customerName);
+        
+        // Small delay to allow the fill to register
+        await sleep(100);
+        
+        // Manually trigger input event to ensure autocomplete fires (like gym selection)
+        await page.evaluate((selector) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            // Trigger input event to ensure autocomplete API is called
+            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+            input.dispatchEvent(inputEvent);
+            
+            // Also trigger change event
+            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+            input.dispatchEvent(changeEvent);
+            
+            // Trigger keyup event (some autocomplete libraries listen to this)
+            const keyupEvent = new KeyboardEvent('keyup', { bubbles: true, cancelable: true });
+            input.dispatchEvent(keyupEvent);
+          }
+        }, browserSelector);
+        
+        dlog("✓ Finished filling customer name using Locator API");
+      } catch (e) {
+        // Fallback: if Locator API fails, use type() with small delays to trigger autocomplete
+        dlog(`Locator API failed, using type() with delays: ${e?.message}`);
+        await foundInputElement.click();
+        await sleep(200);
+        await foundInputElement.focus();
+        await sleep(200);
+        
+        // Clear the input first
+        await foundInputElement.click({ clickCount: 3 });
+        await page.keyboard.press('Backspace');
+        await sleep(100);
+        
+        // Type with small delays to trigger autocomplete (50-100ms per character)
+        await foundInputElement.type(customerName, { delay: 50 + Math.random() * 50 });
+        
+        // Trigger input event after typing
+        await page.evaluate((selector) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+            input.dispatchEvent(inputEvent);
+          }
+        }, browserSelector);
+        
+        dlog("✓ Finished typing customer name with delays");
+      }
       
-      // Clear the input first
-      await foundInputElement.click({ clickCount: 3 }); // Triple click to select all
-      await page.keyboard.press('Backspace');
-      await sleep(100);
+      // Wait for network requests to complete and autocomplete dropdown to appear
+      // Keep network listeners active to catch autocomplete API requests
+      // Give more time for autocomplete API to respond (it might be slower)
+      await sleep(2000); // Increased wait to allow autocomplete API to respond
       
-      // Use type() method - ElementHandle has type() method, not fill()
-      // Using delay: 0 for fast typing like .fill() would do
-      dlog(`Typing customer name using .type(): "${customerName}"`);
-      await foundInputElement.type(customerName, { delay: 0 });
+      // Wait for network idle (autocomplete might fetch from server)
+      try {
+        await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => {
+          dlog("Network idle wait timed out, continuing...");
+        });
+      } catch (e) {
+        dlog(`Network idle wait error: ${e?.message}`);
+      }
       
-      dlog("✓ Finished typing customer name");
+      // Additional wait for autocomplete dropdown to render
+      await sleep(2000); // Increased wait for dropdown to appear
       
-      // Remove network listeners
+      // Now remove network listeners (after waiting for autocomplete)
       page.off('request', requestHandler);
       page.off('response', responseHandler);
       
@@ -2861,21 +2917,6 @@ async function bookClass({
           logToFile(`[NETWORK] Response ${i+1}: ${resp.status} ${resp.url.substring(0, 150)}`);
         });
       }
-      
-      // Wait for network requests to complete and autocomplete dropdown to appear
-      await sleep(1500); // Reduced wait since .fill() is faster
-      
-      // Wait for network idle (autocomplete might fetch from server)
-      try {
-        await page.waitForNetworkIdle({ idleTime: 300, timeout: 3000 }).catch(() => {
-          dlog("Network idle wait timed out, continuing...");
-        });
-      } catch (e) {
-        dlog(`Network idle wait error: ${e?.message}`);
-      }
-      
-      // Additional wait for autocomplete dropdown to render
-      await sleep(1000); // Reduced wait
       
       // Take screenshot to verify autocomplete appeared
       await takeScreenshot('after-customer-search-typing');
@@ -3015,12 +3056,18 @@ async function bookClass({
           
           // Check if text contains fitpass and the number word (or email pattern)
           const hasFitpass = textLower.includes('fitpass');
-          const hasNumberWord = textLower.includes(customerNumberWord);
+          const hasNumberWord = customerNumberWord ? textLower.includes(customerNumberWord) : false;
           const hasEmailPattern = textLower.includes('@test.com') || textLower.includes('@'); // Recording shows email in text
           
-          if (hasFitpass && (hasNumberWord || hasEmailPattern)) {
-            // Make sure it's not just "fitpass" alone - must have the number word or email
-            if (textLower === 'fitpass') continue; // Skip if it's just "fitpass"
+          // More flexible matching: if it has fitpass and email, or fitpass and number word
+          // Also check for number patterns (1, 2, 3, etc.) in email or text
+          const hasNumberPattern = customerNumberWord ? 
+            (textLower.match(/\bfitpass\s*(\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty)\b/i) !== null) :
+            false;
+          
+          if (hasFitpass && (hasNumberWord || hasEmailPattern || hasNumberPattern)) {
+            // Make sure it's not just "fitpass" alone - must have the number word, email, or number pattern
+            if (textLower === 'fitpass' || textLower.trim() === 'fitpass') continue; // Skip if it's just "fitpass"
             
             // Check if this element is within customer overlay (as shown in recording)
             const isInCustomerOverlay = customerOverlay ? customerOverlay.contains(el) : 
@@ -3080,16 +3127,38 @@ async function bookClass({
           return aSize - bSize; // Smaller first
         });
         
+        // Log all span elements found for debugging
+        const allSpans = customerOverlay ? Array.from(customerOverlay.querySelectorAll('span')) : [];
+        const spanTexts = allSpans.map(s => s.textContent?.trim()).filter(t => t);
+        
         return {
           found: customerOptions.length > 0,
           count: customerOptions.length,
-          options: customerOptions
+          options: customerOptions,
+          debug: {
+            customerOverlayFound: customerOverlay !== null,
+            spanCount: allSpans.length,
+            spanTexts: spanTexts.slice(0, 10), // First 10 spans for debugging
+            customerNameLower: customerNameLower,
+            customerNumberWord: customerNumberWord
+          }
         };
-      }, customerName).catch(() => ({ found: false, count: 0, options: [] }));
+      }, customerName).catch(() => ({ found: false, count: 0, options: [], debug: null }));
+      
+      // Log debug info
+      if (dropdownCheck.debug) {
+        logToFile(`[CUSTOMER DEBUG] Customer overlay found: ${dropdownCheck.debug.customerOverlayFound}`);
+        logToFile(`[CUSTOMER DEBUG] Span count: ${dropdownCheck.debug.spanCount}`);
+        logToFile(`[CUSTOMER DEBUG] Span texts: ${JSON.stringify(dropdownCheck.debug.spanTexts)}`);
+        logToFile(`[CUSTOMER DEBUG] Looking for: "${dropdownCheck.debug.customerNameLower}" (number word: "${dropdownCheck.debug.customerNumberWord}")`);
+      }
       
       if (!dropdownCheck.found) {
         logToFile(`❌ ERROR: Customer "${customerName}" not found in dropdown! Cannot select customer.`);
         dlog(`❌ ERROR: Customer "${customerName}" not found in dropdown! Cannot select customer.`);
+        if (dropdownCheck.debug) {
+          logToFile(`[CUSTOMER DEBUG] Available span texts: ${JSON.stringify(dropdownCheck.debug.spanTexts)}`);
+        }
         
         // Take screenshot for debugging
         await takeScreenshot(`customer-dropdown-not-found-${customerNumber}`);
@@ -4087,9 +4156,16 @@ async function bookClass({
   } catch (err) {
     await page.close().catch(() => {});
     await browser.close().catch(() => {});
+    
+    const errorMessage = err?.message || String(err);
+    logToFile(`[ERROR] Booking failed: ${errorMessage}`);
+    logToFile(`[ERROR] Stack: ${err?.stack || 'No stack trace'}`);
+    
     return {
       ok: false,
-      error: err?.message || String(err),
+      error: errorMessage,
+      clickCount: clickCounter,
+      clickLog: clickLog.slice(-20), // Include last 20 clicks in error response
       ...(screenshots.length > 0 ? { screenshots } : {})
     };
   }
@@ -4192,11 +4268,17 @@ app.post("/book", async (req, res) => {
       clearTimeout(watchdog);
       done.sent = true;
       if (result.ok) {
+        console.log(`[RESPONSE] Booking successful: ${result.message}`);
         return res.json(result);
       }
+      console.log(`[RESPONSE] Booking failed: ${result.error}`);
+      console.log(`[RESPONSE] Screenshots: ${result.screenshots?.length || 0}`);
+      console.log(`[RESPONSE] Click count: ${result.clickCount || 0}`);
       return res.status(500).json(result);
     }
   } catch (err) {
+    console.error(`[ERROR] Endpoint error: ${err?.message || err}`);
+    console.error(`[ERROR] Stack: ${err?.stack || 'No stack trace'}`);
     if (!done.sent) {
       clearTimeout(watchdog);
       done.sent = true;
