@@ -3085,8 +3085,19 @@ async function bookClass({
           }
         }, browserSelector, char, charCode);
         
-        // Wait between characters - give autocomplete API time to process
-        const waitTime = i < 3 ? 150 + Math.random() * 100 : 100 + Math.random() * 100;
+        // Wait between characters - CRITICAL: Longer delays to avoid 403 errors from rapid API requests
+        // After first 3 characters, wait longer to allow API to process and avoid rate limiting
+        let waitTime;
+        if (i < 2) {
+          // First 2 characters: moderate delay (200-400ms)
+          waitTime = 200 + Math.random() * 200;
+        } else if (i < 5) {
+          // Characters 3-5: longer delay (400-800ms) to let API catch up
+          waitTime = 400 + Math.random() * 400;
+        } else {
+          // After character 5: even longer delay (600-1200ms) to avoid rate limiting
+          waitTime = 600 + Math.random() * 600;
+        }
         await sleep(waitTime);
       }
       
@@ -3107,14 +3118,15 @@ async function bookClass({
           input.dispatchEvent(changeEvent);
         }
       }, browserSelector);
-      await sleep(200);
+      // CRITICAL: Wait longer after final input to allow API to process without rate limiting
+      await sleep(1000); // Increased from 200ms to 1000ms to avoid 403 errors
       
       dlog("✓ Finished typing customer name with full event sequence");
       
       // Wait for network requests to complete and autocomplete dropdown to appear
       // Keep network listeners active to catch autocomplete API requests
-      // Give more time for autocomplete API to respond (it might be slower)
-      await sleep(2000); // Increased wait to allow autocomplete API to respond
+      // Give more time for autocomplete API to respond (it might be slower due to rate limiting)
+      await sleep(3000); // Increased from 2000ms to 3000ms to allow API to respond after rate limiting
       
       // Wait for network idle (autocomplete might fetch from server)
       try {
