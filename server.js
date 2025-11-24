@@ -548,7 +548,6 @@ async function bookClass({
   });
   
   // Override navigator properties to match local Chrome (not headless)
-  // SIMPLE VERSION - Restored from working commit 51efa4e
   await page.evaluateOnNewDocument(() => {
     // Override platform to match local
     Object.defineProperty(navigator, 'platform', {
@@ -658,13 +657,9 @@ async function bookClass({
   };
   page.setDefaultTimeout(TIMEOUT);
 
-  // Log page events (simplified - only essential ones)
+  // Log page events - match working commit b7d48c1 exactly
   page.on("console", (msg) => logToFile(`[PAGE] ${msg.text()}`));
   page.on("requestfailed", (r) => logToFile(`[REQ FAIL] ${r.url()} ${r.failure()?.errorText}`));
-  page.on("pageerror", (error) => logToFile(`[PAGE] ERROR ${error.message}`));
-  
-  // REMOVED: Page validity check before starting - might trigger detection
-  // REMOVED: framedetached listener - might interfere with normal navigation
 
   const step = async (label, fn) => {
     logToFile(`➡️ ${label}`);
@@ -681,7 +676,6 @@ async function bookClass({
 
   try {
     // Step 1: Navigate to login page
-    // SIMPLIFIED: Back to original working version - no complex checks or waits
     await step("Navigate to login", async () => {
       await page.setViewport({ width: 1920, height: 1080 }); // Use realistic viewport
       dlog("Navigating to login page");
@@ -691,14 +685,23 @@ async function bookClass({
       });
       dlog("Page loaded");
       
-      // REMOVED: Stealth check - page.evaluate() might trigger detection
-      // The stealth plugin is already active, so we don't need to verify
+      // Verify stealth is working - check if webdriver is hidden
+      const webdriverCheck = await page.evaluate(() => {
+        return {
+          webdriver: navigator.webdriver,
+          userAgent: navigator.userAgent,
+          plugins: navigator.plugins.length,
+          languages: navigator.languages,
+          chrome: !!window.chrome
+        };
+      });
+      dlog(`Stealth check: webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
+      logToFile(`[STEALTH] webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
       
       await sleep(1000); // Wait for page to fully render and scripts to load
     });
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
-    // SIMPLIFIED: Back to original working version
     await step("Enter gym location", async () => {
       // Wait for the input field to be visible - use the same selector as reference
       // Reference code uses: input[placeholder*="Search for your business"]
