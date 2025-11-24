@@ -3004,194 +3004,56 @@ async function bookClass({
       page.on('request', requestHandler);
       page.on('response', responseHandler);
       
-      // CRITICAL: Use character-by-character typing with FULL event sequence (like gym selection)
-      // This simulates REAL human typing to trigger autocomplete API properly
-      dlog(`Typing customer name "${customerName}" with full event sequence (ultra-realistic)...`);
-      
-      // NEW APPROACH: Wait longer before starting to type - let page fully initialize
-      // This helps avoid detection by giving the page time to set up properly
-      dlog(`Waiting 3 seconds before starting to type (allowing page to fully initialize)...`);
-      await sleep(3000);
+      // SIMPLIFIED APPROACH: Use Locator API .fill() method (like user's Puppeteer recording)
+      // This matches what works locally - fast and reliable
+      dlog(`Using Locator API .fill() method to input customer name "${customerName}" (matching local behavior)...`);
       
       // Ensure input is focused and ready
       await foundInputElement.click();
-      await sleep(300 + Math.random() * 200); // Random wait 300-500ms
+      await sleep(200);
       await foundInputElement.focus();
-      await sleep(200 + Math.random() * 200); // Random wait 200-400ms
-      
-      // Add random mouse movement to simulate human behavior
-      const inputBox = await foundInputElement.boundingBox();
-      if (inputBox) {
-        // Move mouse slightly within the input box (human-like micro-movements)
-        await page.mouse.move(
-          inputBox.x + inputBox.width / 2 + (Math.random() - 0.5) * 10,
-          inputBox.y + inputBox.height / 2 + (Math.random() - 0.5) * 10
-        );
-        await sleep(100 + Math.random() * 100);
-      }
+      await sleep(200);
       
       // Clear any existing value first
       await foundInputElement.click({ clickCount: 3 });
-      await sleep(200 + Math.random() * 200);
+      await sleep(100);
       await page.keyboard.press('Backspace');
-      await sleep(300 + Math.random() * 200);
+      await sleep(200);
       
-      // Trigger focus events to ensure autocomplete is listening
+      // Use Locator API .fill() method (like user's Puppeteer recording)
+      // This is faster and matches what works locally
+      const customerLocator = page.locator(foundInputSelector);
+      await customerLocator.fill(customerName);
+      
+      // Manually trigger events to ensure autocomplete fires (like user's recording)
       await page.evaluate((selector) => {
         const input = document.querySelector(selector);
         if (input) {
-          input.focus();
-          input.dispatchEvent(new Event('focus', { bubbles: true }));
-          input.dispatchEvent(new Event('click', { bubbles: true }));
-          input.dispatchEvent(new Event('mousedown', { bubbles: true }));
-          input.dispatchEvent(new Event('mouseup', { bubbles: true }));
-        }
-      }, browserSelector);
-      await sleep(400 + Math.random() * 300); // Wait 400-700ms before typing
-      
-      const customerNameLower = customerName.toLowerCase();
-      
-      // Type each character with FULL event sequence (keydown -> keypress -> keyboard.type -> input -> keyup)
-      for (let i = 0; i < customerNameLower.length; i++) {
-        const char = customerNameLower[i];
-        const charCode = char.charCodeAt(0);
-        
-        // Generate random delay between characters (realistic typing speed)
-        const baseDelay = 50 + Math.random() * 50;
-        const occasionalPause = Math.random() < 0.05 ? 100 : 0; // 5% chance of longer pause
-        const delay = baseDelay + occasionalPause;
-        
-        dlog(`Typing character ${i+1}/${customerNameLower.length}: "${char}" (delay: ${Math.round(delay)}ms)`);
-        
-        // FULL EVENT SEQUENCE for each character (like a real human):
-        // 1. KeyDown event
-        await page.evaluate((selector, char, charCode) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const keyDownEvent = new KeyboardEvent('keydown', {
-              key: char,
-              code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
-              keyCode: charCode,
-              which: charCode,
-              bubbles: true,
-              cancelable: true
-            });
-            input.dispatchEvent(keyDownEvent);
-          }
-        }, browserSelector, char, charCode);
-        await sleep(20 + Math.random() * 30);
-        
-        // 2. KeyPress event
-        await page.evaluate((selector, char, charCode) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const keyPressEvent = new KeyboardEvent('keypress', {
-              key: char,
-              code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
-              keyCode: charCode,
-              which: charCode,
-              bubbles: true,
-              cancelable: true
-            });
-            input.dispatchEvent(keyPressEvent);
-          }
-        }, browserSelector, char, charCode);
-        await sleep(15 + Math.random() * 15);
-        
-        // 3. Actually type the character using keyboard (this sets the value)
-        await page.keyboard.type(char, { delay: 0 }); // No delay here, we control timing manually
-        
-        // 4. Input event (fires when value changes)
-        await page.evaluate((selector) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-            Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
-            input.dispatchEvent(inputEvent);
-          }
-        }, browserSelector);
-        await sleep(20 + Math.random() * 30);
-        
-        // 5. KeyUp event
-        await page.evaluate((selector, char, charCode) => {
-          const input = document.querySelector(selector);
-          if (input) {
-            const keyUpEvent = new KeyboardEvent('keyup', {
-              key: char,
-              code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
-              keyCode: charCode,
-              which: charCode,
-              bubbles: true,
-              cancelable: true
-            });
-            input.dispatchEvent(keyUpEvent);
-          }
-        }, browserSelector, char, charCode);
-        
-        // Add occasional subtle mouse movement (5% chance) to simulate human behavior
-        if (Math.random() < 0.05 && inputBox) {
-          await page.mouse.move(
-            inputBox.x + inputBox.width / 2 + (Math.random() - 0.5) * 5,
-            inputBox.y + inputBox.height / 2 + (Math.random() - 0.5) * 5
-          );
-        }
-        
-        // Wait between characters - CRITICAL: MUCH longer delays to avoid 403 errors
-        // Progressive delays that increase significantly to avoid rate limiting
-        let waitTime;
-        if (i < 2) {
-          // First 2 characters: longer delay (500-800ms) - start slow
-          waitTime = 500 + Math.random() * 300;
-        } else if (i < 5) {
-          // Characters 3-5: even longer delay (800-1500ms) to let API catch up
-          waitTime = 800 + Math.random() * 700;
-        } else {
-          // After character 5: very long delay (1500-2500ms) to avoid rate limiting
-          waitTime = 1500 + Math.random() * 1000;
-        }
-        
-        // Add occasional longer pause (10% chance) to simulate human thinking/hesitation
-        if (Math.random() < 0.10) {
-          const extraPause = 1000 + Math.random() * 2000; // 1-3 seconds extra pause
-          dlog(`  → Random human-like pause: ${Math.round(extraPause)}ms`);
-          waitTime += extraPause;
-        }
-        
-        await sleep(waitTime);
-      }
-      
-      // Final input event to ensure autocomplete fires one more time
-      await page.evaluate((selector) => {
-        const input = document.querySelector(selector);
-        if (input) {
+          // Trigger input event
           const inputEvent = new Event('input', { bubbles: true, cancelable: true });
           Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
           input.dispatchEvent(inputEvent);
           
-          // Also trigger compositionend (for autocomplete systems that listen to it)
-          const compositionEndEvent = new CompositionEvent('compositionend', { bubbles: true });
-          input.dispatchEvent(compositionEndEvent);
-          
           // Trigger change event
           const changeEvent = new Event('change', { bubbles: true, cancelable: true });
           input.dispatchEvent(changeEvent);
+          
+          // Trigger keyup event (some autocomplete systems listen to this)
+          const keyUpEvent = new KeyboardEvent('keyup', { bubbles: true });
+          input.dispatchEvent(keyUpEvent);
         }
       }, browserSelector);
-      // CRITICAL: Wait MUCH longer after final input to allow API to process without rate limiting
-      // Increased significantly to avoid 403 errors
-      await sleep(2000 + Math.random() * 1000); // 2-3 seconds random wait
       
-      dlog("✓ Finished typing customer name with full event sequence");
+      dlog("✓ Finished filling customer name using Locator API .fill()");
       
-      // Wait for network requests to complete and autocomplete dropdown to appear
-      // Keep network listeners active to catch autocomplete API requests
-      // Give MUCH more time for autocomplete API to respond (it might be slower due to rate limiting)
-      dlog("Waiting 5 seconds for autocomplete API to respond...");
-      await sleep(5000); // Increased to 5 seconds to allow API to respond after rate limiting
+      // Wait for autocomplete dropdown to appear (shorter wait since .fill() is instant)
+      dlog("Waiting for autocomplete dropdown to appear...");
+      await sleep(1500); // Shorter wait - matches local behavior
       
       // Wait for network idle (autocomplete might fetch from server)
+      // Shorter timeout to match local behavior (works instantly locally)
       try {
-        await page.waitForNetworkIdle({ idleTime: 500, timeout: 5000 }).catch(() => {
+        await page.waitForNetworkIdle({ idleTime: 300, timeout: 2000 }).catch(() => {
           dlog("Network idle wait timed out, continuing...");
         });
       } catch (e) {
@@ -3199,8 +3061,8 @@ async function bookClass({
       }
       
       // Additional wait for autocomplete dropdown to render
-      dlog("Waiting additional 3 seconds for dropdown to render...");
-      await sleep(3000); // Increased wait for dropdown to appear
+      // Shorter wait to match local behavior (dropdown appears instantly locally)
+      await sleep(1000); // Reduced from 3000ms to match local behavior
       
       // Now remove network listeners (after waiting for autocomplete)
       page.off('request', requestHandler);
