@@ -1123,16 +1123,19 @@ async function bookClass({
       } catch (e) {
         // If we can't find the input, the page might have closed or not loaded properly
         dlog(`⚠ Input field not found: ${e?.message}`);
-        // Try to check if page is still valid
+        // Try to check if page is still valid (but don't throw error if frame is detached)
         try {
           const testUrl = page.url();
           dlog(`Page URL when input not found: ${testUrl}`);
           // If we can get the URL, page might still be valid but input not loaded yet
           // Continue and let the next step handle finding the input
         } catch (urlError) {
-          throw new Error(`Page became invalid while waiting for input: ${urlError?.message}`);
+          // Frame detachment is normal during navigation - don't throw error
+          // The next step will handle finding the input or throw a more specific error
+          dlog(`⚠ Could not get page URL (frame may have detached): ${urlError?.message}`);
+          // Continue anyway - let the next step handle it
         }
-        dlog("⚠ Input field not found yet, but page is still valid - continuing");
+        dlog("⚠ Input field not found yet - continuing to next step");
       }
       
       // Verify stealth is working - check if webdriver is hidden
