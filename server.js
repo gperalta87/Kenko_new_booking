@@ -2982,16 +2982,33 @@ async function bookClass({
       // This simulates REAL human typing to trigger autocomplete API properly
       dlog(`Typing customer name "${customerName}" with full event sequence (ultra-realistic)...`);
       
+      // NEW APPROACH: Wait longer before starting to type - let page fully initialize
+      // This helps avoid detection by giving the page time to set up properly
+      dlog(`Waiting 3 seconds before starting to type (allowing page to fully initialize)...`);
+      await sleep(3000);
+      
       // Ensure input is focused and ready
       await foundInputElement.click();
-      await sleep(150);
+      await sleep(300 + Math.random() * 200); // Random wait 300-500ms
       await foundInputElement.focus();
-      await sleep(150);
+      await sleep(200 + Math.random() * 200); // Random wait 200-400ms
+      
+      // Add random mouse movement to simulate human behavior
+      const inputBox = await foundInputElement.boundingBox();
+      if (inputBox) {
+        // Move mouse slightly within the input box (human-like micro-movements)
+        await page.mouse.move(
+          inputBox.x + inputBox.width / 2 + (Math.random() - 0.5) * 10,
+          inputBox.y + inputBox.height / 2 + (Math.random() - 0.5) * 10
+        );
+        await sleep(100 + Math.random() * 100);
+      }
       
       // Clear any existing value first
       await foundInputElement.click({ clickCount: 3 });
+      await sleep(200 + Math.random() * 200);
       await page.keyboard.press('Backspace');
-      await sleep(100);
+      await sleep(300 + Math.random() * 200);
       
       // Trigger focus events to ensure autocomplete is listening
       await page.evaluate((selector) => {
@@ -3004,7 +3021,7 @@ async function bookClass({
           input.dispatchEvent(new Event('mouseup', { bubbles: true }));
         }
       }, browserSelector);
-      await sleep(150);
+      await sleep(400 + Math.random() * 300); // Wait 400-700ms before typing
       
       const customerNameLower = customerName.toLowerCase();
       
@@ -3085,19 +3102,35 @@ async function bookClass({
           }
         }, browserSelector, char, charCode);
         
-        // Wait between characters - CRITICAL: Longer delays to avoid 403 errors from rapid API requests
-        // After first 3 characters, wait longer to allow API to process and avoid rate limiting
+        // Add occasional subtle mouse movement (5% chance) to simulate human behavior
+        if (Math.random() < 0.05 && inputBox) {
+          await page.mouse.move(
+            inputBox.x + inputBox.width / 2 + (Math.random() - 0.5) * 5,
+            inputBox.y + inputBox.height / 2 + (Math.random() - 0.5) * 5
+          );
+        }
+        
+        // Wait between characters - CRITICAL: MUCH longer delays to avoid 403 errors
+        // Progressive delays that increase significantly to avoid rate limiting
         let waitTime;
         if (i < 2) {
-          // First 2 characters: moderate delay (200-400ms)
-          waitTime = 200 + Math.random() * 200;
+          // First 2 characters: longer delay (500-800ms) - start slow
+          waitTime = 500 + Math.random() * 300;
         } else if (i < 5) {
-          // Characters 3-5: longer delay (400-800ms) to let API catch up
-          waitTime = 400 + Math.random() * 400;
+          // Characters 3-5: even longer delay (800-1500ms) to let API catch up
+          waitTime = 800 + Math.random() * 700;
         } else {
-          // After character 5: even longer delay (600-1200ms) to avoid rate limiting
-          waitTime = 600 + Math.random() * 600;
+          // After character 5: very long delay (1500-2500ms) to avoid rate limiting
+          waitTime = 1500 + Math.random() * 1000;
         }
+        
+        // Add occasional longer pause (10% chance) to simulate human thinking/hesitation
+        if (Math.random() < 0.10) {
+          const extraPause = 1000 + Math.random() * 2000; // 1-3 seconds extra pause
+          dlog(`  → Random human-like pause: ${Math.round(extraPause)}ms`);
+          waitTime += extraPause;
+        }
+        
         await sleep(waitTime);
       }
       
@@ -3118,15 +3151,17 @@ async function bookClass({
           input.dispatchEvent(changeEvent);
         }
       }, browserSelector);
-      // CRITICAL: Wait longer after final input to allow API to process without rate limiting
-      await sleep(1000); // Increased from 200ms to 1000ms to avoid 403 errors
+      // CRITICAL: Wait MUCH longer after final input to allow API to process without rate limiting
+      // Increased significantly to avoid 403 errors
+      await sleep(2000 + Math.random() * 1000); // 2-3 seconds random wait
       
       dlog("✓ Finished typing customer name with full event sequence");
       
       // Wait for network requests to complete and autocomplete dropdown to appear
       // Keep network listeners active to catch autocomplete API requests
-      // Give more time for autocomplete API to respond (it might be slower due to rate limiting)
-      await sleep(3000); // Increased from 2000ms to 3000ms to allow API to respond after rate limiting
+      // Give MUCH more time for autocomplete API to respond (it might be slower due to rate limiting)
+      dlog("Waiting 5 seconds for autocomplete API to respond...");
+      await sleep(5000); // Increased to 5 seconds to allow API to respond after rate limiting
       
       // Wait for network idle (autocomplete might fetch from server)
       try {
@@ -3138,7 +3173,8 @@ async function bookClass({
       }
       
       // Additional wait for autocomplete dropdown to render
-      await sleep(2000); // Increased wait for dropdown to appear
+      dlog("Waiting additional 3 seconds for dropdown to render...");
+      await sleep(3000); // Increased wait for dropdown to appear
       
       // Now remove network listeners (after waiting for autocomplete)
       page.off('request', requestHandler);
