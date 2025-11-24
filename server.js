@@ -1060,6 +1060,14 @@ async function bookClass({
   try {
     // Step 1: Navigate to login page
     await step("Navigate to login", async () => {
+      // Check if page is still valid before starting
+      try {
+        const testUrl = page.url();
+        dlog(`Page is valid, current URL: ${testUrl}`);
+      } catch (e) {
+        throw new Error(`Page is not valid before navigation: ${e?.message}`);
+      }
+      
       await page.setViewport({ width: 1920, height: 1080 }); // Use realistic viewport
       dlog("Navigating to login page");
       try {
