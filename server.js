@@ -45,7 +45,7 @@ const logToFile = (message) => {
 
 // Constants
 const TIMEOUT = 10000;
-const CUSTOMER_NAME = "Fitpass"; // Fixed for now, will be parameterized later
+const CUSTOMER_NAME = "Fitpass One"; // Will try Fitpass One, Two, Three, etc. up to Twenty if not available
 const PLAN_SELECTOR = "div:nth-of-type(32)"; // Fitpass Check-in plan
 
 // Utilities
@@ -321,6 +321,9 @@ async function bookClass({
   
   // Store screenshots for debugging
   const screenshots = [];
+  
+  // Store selected customer name (will be set during customer selection)
+  let selectedCustomerName = null;
   
   const dlog = (...a) => {
     console.log(...a);
@@ -2242,56 +2245,124 @@ async function bookClass({
         dlog(`  Element: ${classInfo.elementTag || 'unknown'}, Class: ${classInfo.elementClass || 'none'}`);
         dlog(`  Selector: ${classInfo.selector || 'none'}`);
         
-        // Now click it using Puppeteer's native click methods
-        dlog(`Attempting to click the class element using Puppeteer...`);
+        // Retry logic: if "Book Customer" button is not found, go back to calendar and retry
+        const MAX_CLASS_CLICK_RETRIES = 3;
+        let classClickSuccess = false;
         
-        let clicked = false;
-        
-        // Method 1: Try using the selector if available
-        if (classInfo.selector) {
-          try {
-            await page.waitForSelector(classInfo.selector, { visible: true, timeout: 3000 });
-            const element = await page.$(classInfo.selector);
-            if (element) {
-              const isVisible = await element.isVisible().catch(() => false);
-              if (isVisible) {
-                dlog(`  Clicking using selector: ${classInfo.selector}`);
-                await element.scrollIntoView();
-                await sleep(300);
-                
-                // Click at the left side of the element, avoiding any buttons inside
-                const box = await element.boundingBox();
-                if (box) {
-                  // Click at 12% from left edge to avoid delete buttons (usually on the right)
-                  await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
-                  dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
-                } else {
-                  await element.click();
-                }
-                clicked = true;
-                dlog(`  ✓ Clicked using selector`);
-              }
-            }
-          } catch (e) {
-            dlog(`  Selector click failed: ${e?.message}`);
-          }
-        }
-        
-        // Method 2: Find all matching elements and click the one that matches our event text
-        if (!clicked) {
-          try {
-            dlog(`  Trying to find element by class and event text...`);
-            const elements = await page.$$('div.cal-event-container, div[class*="cal-event"], mwl-calendar-week-view-event');
+        for (let attempt = 1; attempt <= MAX_CLASS_CLICK_RETRIES; attempt++) {
+          if (attempt > 1) {
+            logToFile(`[RETRY] Attempt ${attempt} to click class and open booking dialog`);
+            dlog(`[RETRY] Attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES} - Going back to calendar and retrying...`);
             
-            for (let i = 0; i < elements.length; i++) {
-              const element = elements[i];
-              const isVisible = await element.isVisible().catch(() => false);
-              if (!isVisible) continue;
+            // Close any modals/dialogs by pressing Escape multiple times
+            await page.keyboard.press('Escape');
+            await sleep(500);
+            await page.keyboard.press('Escape');
+            await sleep(500);
+            
+            // Wait for calendar to be visible again
+            await sleep(1000);
+            
+            // Take screenshot before retry
+            await takeScreenshot(`before-class-click-retry-${attempt}`);
+          }
+          
+          // Now click it using Puppeteer's native click methods
+          dlog(`Attempting to click the class element using Puppeteer... (attempt ${attempt})`);
+          
+          let clicked = false;
+          
+          // Method 1: Try using the selector if available
+          if (classInfo.selector) {
+            try {
+              await page.waitForSelector(classInfo.selector, { visible: true, timeout: 3000 });
+              const element = await page.$(classInfo.selector);
+              if (element) {
+                const isVisible = await element.isVisible().catch(() => false);
+                if (isVisible) {
+                  dlog(`  Clicking using selector: ${classInfo.selector}`);
+                  await element.scrollIntoView();
+                  await sleep(300);
+                  
+                  // Click at the left side of the element, avoiding any buttons inside
+                  const box = await element.boundingBox();
+                  if (box) {
+                    // Click at 12% from left edge to avoid delete buttons (usually on the right)
+                    await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
+                    dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
+                  } else {
+                    await element.click();
+                  }
+                  clicked = true;
+                  dlog(`  ✓ Clicked using selector`);
+                }
+              }
+            } catch (e) {
+              dlog(`  Selector click failed: ${e?.message}`);
+            }
+          }
+          
+          // Method 2: Find all matching elements and click the one that matches our event text
+          if (!clicked) {
+            try {
+              dlog(`  Trying to find element by class and event text...`);
+              const elements = await page.$$('div.cal-event-container, div[class*="cal-event"], mwl-calendar-week-view-event');
               
-              const text = await element.evaluate(el => el.textContent || '');
-              const timeMatch = text.match(/\b(\d{1,2}):(\d{1,2})\s*(am|pm)?\b/i);
+              for (let i = 0; i < elements.length; i++) {
+                const element = elements[i];
+                const isVisible = await element.isVisible().catch(() => false);
+                if (!isVisible) continue;
+                
+                const text = await element.evaluate(el => el.textContent || '');
+                const timeMatch = text.match(/\b(\d{1,2}):(\d{1,2})\s*(am|pm)?\b/i);
+                
+                if (timeMatch) {
+                  let eventHour = parseInt(timeMatch[1]);
+                  const eventMinute = parseInt(timeMatch[2]);
+                  const eventPeriod = timeMatch[3]?.toLowerCase() || '';
+                  
+                  let eventHour24 = eventHour;
+                  if (eventPeriod === 'pm' && eventHour !== 12) eventHour24 = eventHour + 12;
+                  if (eventPeriod === 'am' && eventHour === 12) eventHour24 = 0;
+                  
+                  if (eventHour24 === targetHour && eventMinute === targetMinute) {
+                    dlog(`  Found matching element at index ${i}, clicking...`);
+                    await element.scrollIntoView();
+                    await sleep(300);
+                    
+                  // Click at the left side of the element to avoid delete buttons
+                  const box = await element.boundingBox();
+                  if (box) {
+                    // Click at 12% from left edge (delete buttons are usually on the right)
+                    await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
+                    dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
+                  } else {
+                    await element.click();
+                  }
+                    clicked = true;
+                    dlog(`  ✓ Clicked matching element at index ${i}`);
+                    break;
+                  }
+                }
+              }
+            } catch (e) {
+              dlog(`  Element array click failed: ${e?.message}`);
+            }
+          }
+          
+          // Method 3: Use page.evaluate to find and click via native browser click
+          if (!clicked) {
+            dlog(`  Trying native browser click via page.evaluate...`);
+            const clickedInBrowser = await page.evaluate((targetHour, targetMinute) => {
+              const allEvents = document.querySelectorAll('div.cal-event-container, div[class*="cal-event"], mwl-calendar-week-view-event');
               
-              if (timeMatch) {
+              for (const event of allEvents) {
+                if (event.offsetParent === null) continue;
+                
+                const eventText = event.textContent || '';
+                const timeMatch = eventText.match(/\b(\d{1,2}):(\d{1,2})\s*(am|pm)?\b/i);
+                if (!timeMatch) continue;
+                
                 let eventHour = parseInt(timeMatch[1]);
                 const eventMinute = parseInt(timeMatch[2]);
                 const eventPeriod = timeMatch[3]?.toLowerCase() || '';
@@ -2301,226 +2372,202 @@ async function bookClass({
                 if (eventPeriod === 'am' && eventHour === 12) eventHour24 = 0;
                 
                 if (eventHour24 === targetHour && eventMinute === targetMinute) {
-                  dlog(`  Found matching element at index ${i}, clicking...`);
-                  await element.scrollIntoView();
-                  await sleep(300);
+                  // Make sure we're clicking the main event element, not a delete button inside it
+                  // Find the main clickable area (avoid buttons)
+                  let clickTarget = event;
                   
-                // Click at the left side of the element to avoid delete buttons
-                const box = await element.boundingBox();
-                if (box) {
-                  // Click at 12% from left edge (delete buttons are usually on the right)
-                  await page.mouse.click(box.x + box.width * 0.12, box.y + box.height / 2);
-                  dlog(`  Clicked at ${(box.width * 0.12).toFixed(1)}px from left edge (12% of width)`);
-                } else {
-                  await element.click();
-                }
-                  clicked = true;
-                  dlog(`  ✓ Clicked matching element at index ${i}`);
-                  break;
-                }
-              }
-            }
-          } catch (e) {
-            dlog(`  Element array click failed: ${e?.message}`);
-          }
-        }
-        
-        // Method 3: Use page.evaluate to find and click via native browser click
-        if (!clicked) {
-          dlog(`  Trying native browser click via page.evaluate...`);
-          const clickedInBrowser = await page.evaluate((targetHour, targetMinute) => {
-            const allEvents = document.querySelectorAll('div.cal-event-container, div[class*="cal-event"], mwl-calendar-week-view-event');
-            
-            for (const event of allEvents) {
-              if (event.offsetParent === null) continue;
-              
-              const eventText = event.textContent || '';
-              const timeMatch = eventText.match(/\b(\d{1,2}):(\d{1,2})\s*(am|pm)?\b/i);
-              if (!timeMatch) continue;
-              
-              let eventHour = parseInt(timeMatch[1]);
-              const eventMinute = parseInt(timeMatch[2]);
-              const eventPeriod = timeMatch[3]?.toLowerCase() || '';
-              
-              let eventHour24 = eventHour;
-              if (eventPeriod === 'pm' && eventHour !== 12) eventHour24 = eventHour + 12;
-              if (eventPeriod === 'am' && eventHour === 12) eventHour24 = 0;
-              
-              if (eventHour24 === targetHour && eventMinute === targetMinute) {
-                // Make sure we're clicking the main event element, not a delete button inside it
-                // Find the main clickable area (avoid buttons)
-                let clickTarget = event;
-                
-                // Check if event contains buttons - if so, click the main container, not the buttons
-                const buttons = event.querySelectorAll('button, [role="button"], [class*="delete"], [class*="remove"], [class*="close"], [aria-label*="delete" i], [aria-label*="remove" i]');
-                
-                // Always click on the LEFT side of the event (10-15% from left edge) to avoid delete buttons
-                // Delete buttons are usually on the right side
-                const rect = event.getBoundingClientRect();
-                const clickX = rect.left + rect.width * 0.12; // Click at 12% from left edge
-                const clickY = rect.top + rect.height / 2; // Vertical center
-                
-                // Double-check that this click point is not over any button
-                let safeToClick = true;
-                for (const btn of buttons) {
-                  const btnRect = btn.getBoundingClientRect();
-                  if (clickX >= btnRect.left && clickX <= btnRect.right &&
-                      clickY >= btnRect.top && clickY <= btnRect.bottom) {
-                    safeToClick = false;
-                    break;
+                  // Check if event contains buttons - if so, click the main container, not the buttons
+                  const buttons = event.querySelectorAll('button, [role="button"], [class*="delete"], [class*="remove"], [class*="close"], [aria-label*="delete" i], [aria-label*="remove" i]');
+                  
+                  // Always click on the LEFT side of the event (10-15% from left edge) to avoid delete buttons
+                  // Delete buttons are usually on the right side
+                  const rect = event.getBoundingClientRect();
+                  const clickX = rect.left + rect.width * 0.12; // Click at 12% from left edge
+                  const clickY = rect.top + rect.height / 2; // Vertical center
+                  
+                  // Double-check that this click point is not over any button
+                  let safeToClick = true;
+                  for (const btn of buttons) {
+                    const btnRect = btn.getBoundingClientRect();
+                    if (clickX >= btnRect.left && clickX <= btnRect.right &&
+                        clickY >= btnRect.top && clickY <= btnRect.bottom) {
+                      safeToClick = false;
+                      break;
+                    }
                   }
-                }
-                
-                // If click point is over a button, move even more to the left
-                let finalClickX = clickX;
-                if (!safeToClick) {
-                  finalClickX = rect.left + rect.width * 0.05; // Click at 5% from left edge
-                  dlog(`  Click point was over button, moving to 5% from left`);
-                }
-                
-                // Scroll into view
-                event.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                
-                // Click at the safe position (left side of event)
-                const clickEvent = new MouseEvent('click', {
-                  bubbles: true,
-                  cancelable: true,
-                  view: window,
-                  clientX: finalClickX,
-                  clientY: clickY
-                });
-                
-                event.dispatchEvent(clickEvent);
-                
-                return true;
-              }
-            }
-            return false;
-          }, targetHour, targetMinute).catch(() => false);
-          
-          if (clickedInBrowser) {
-            clicked = true;
-            dlog(`  ✓ Clicked using native browser click`);
-          }
-        }
-        
-        if (!clicked) {
-          dlog(`  ✗ Could not click the element using any method`);
-        }
-        
-        // Wait for the click to register
-        await sleep(500);
-        
-        // Take screenshot immediately after clicking class to see what appeared
-        await takeScreenshot('after-class-click');
-        
-        // The delete modal ALWAYS appears when clicking a class - we need to dismiss it
-        dlog(`Checking for delete modal (expected to appear)...`);
-        const deleteModalAppeared = await page.evaluate(() => {
-          const bodyText = (document.body.textContent || '').toLowerCase();
-          if (bodyText.includes('delete class instance') || bodyText.includes('permanently delete')) {
-            return true;
-          }
-          // Check for delete modal buttons
-          const buttons = Array.from(document.querySelectorAll('button'));
-          for (const btn of buttons) {
-            if (btn.offsetParent === null) continue;
-            const btnText = (btn.textContent || '').toLowerCase();
-            if (btnText.includes('yes, delete') || (btnText.includes('delete') && btnText.includes('class'))) {
-              // Check if it's in a modal context
-              let parent = btn.parentElement;
-              let depth = 0;
-              while (parent && depth < 5) {
-                const parentText = (parent.textContent || '').toLowerCase();
-                if (parentText.includes('delete class')) {
+                  
+                  // If click point is over a button, move even more to the left
+                  let finalClickX = clickX;
+                  if (!safeToClick) {
+                    finalClickX = rect.left + rect.width * 0.05; // Click at 5% from left edge
+                    dlog(`  Click point was over button, moving to 5% from left`);
+                  }
+                  
+                  // Scroll into view
+                  event.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  
+                  // Click at the safe position (left side of event)
+                  const clickEvent = new MouseEvent('click', {
+                    bubbles: true,
+                    cancelable: true,
+                    view: window,
+                    clientX: finalClickX,
+                    clientY: clickY
+                  });
+                  
+                  event.dispatchEvent(clickEvent);
+                  
                   return true;
                 }
-                parent = parent.parentElement;
-                depth++;
               }
+              return false;
+            }, targetHour, targetMinute).catch(() => false);
+            
+            if (clickedInBrowser) {
+              clicked = true;
+              dlog(`  ✓ Clicked using native browser click`);
             }
           }
-          return false;
-        }).catch(() => false);
-        
-        if (deleteModalAppeared) {
-          logToFile(`[MODAL] Delete modal appeared (expected) - dismissing it...`);
-          dlog(`Delete modal appeared (expected) - dismissing it...`);
           
-          // Dismiss the delete modal by clicking "Go back" button
-          const dismissed = await page.evaluate(() => {
-            const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+          if (!clicked) {
+            dlog(`  ✗ Could not click the element using any method`);
+            if (attempt < MAX_CLASS_CLICK_RETRIES) {
+              continue; // Retry
+            } else {
+              throw new Error(`Could not click class element after ${MAX_CLASS_CLICK_RETRIES} attempts`);
+            }
+          }
+          
+          // Wait for the click to register
+          await sleep(500);
+          
+          // Take screenshot immediately after clicking class to see what appeared
+          await takeScreenshot(`after-class-click${attempt > 1 ? `-retry-${attempt}` : ''}`);
+          
+          // The delete modal ALWAYS appears when clicking a class - we need to dismiss it
+          dlog(`Checking for delete modal (expected to appear)...`);
+          const deleteModalAppeared = await page.evaluate(() => {
+            const bodyText = (document.body.textContent || '').toLowerCase();
+            if (bodyText.includes('delete class instance') || bodyText.includes('permanently delete')) {
+              return true;
+            }
+            // Check for delete modal buttons
+            const buttons = Array.from(document.querySelectorAll('button'));
             for (const btn of buttons) {
               if (btn.offsetParent === null) continue;
-              const text = (btn.textContent || '').trim().toLowerCase();
-              // Look for "Go back" button
-              if (text === 'go back' || text === 'go back' || text.includes('back')) {
-                btn.click();
-                return true;
+              const btnText = (btn.textContent || '').toLowerCase();
+              if (btnText.includes('yes, delete') || (btnText.includes('delete') && btnText.includes('class'))) {
+                // Check if it's in a modal context
+                let parent = btn.parentElement;
+                let depth = 0;
+                while (parent && depth < 5) {
+                  const parentText = (parent.textContent || '').toLowerCase();
+                  if (parentText.includes('delete class')) {
+                    return true;
+                  }
+                  parent = parent.parentElement;
+                  depth++;
+                }
               }
             }
             return false;
           }).catch(() => false);
           
-          if (dismissed) {
-            await sleep(1000);
-            dlog(`✓ Successfully dismissed delete modal by clicking "Go back"`);
-            logToFile(`✓ Successfully dismissed delete modal`);
+          if (deleteModalAppeared) {
+            logToFile(`[MODAL] Delete modal appeared (expected) - dismissing it...`);
+            dlog(`Delete modal appeared (expected) - dismissing it...`);
+            
+            // Dismiss the delete modal by clicking "Go back" button
+            const dismissed = await page.evaluate(() => {
+              const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+              for (const btn of buttons) {
+                if (btn.offsetParent === null) continue;
+                const text = (btn.textContent || '').trim().toLowerCase();
+                // Look for "Go back" button
+                if (text === 'go back' || text === 'go back' || text.includes('back')) {
+                  btn.click();
+                  return true;
+                }
+              }
+              return false;
+            }).catch(() => false);
+            
+            if (dismissed) {
+              await sleep(1000);
+              dlog(`✓ Successfully dismissed delete modal by clicking "Go back"`);
+              logToFile(`✓ Successfully dismissed delete modal`);
+            } else {
+              // Fallback: try Escape key
+              dlog(`"Go back" button not found, trying Escape key...`);
+              await page.keyboard.press('Escape');
+              await sleep(1000);
+              dlog(`✓ Dismissed delete modal using Escape key`);
+            }
+            
+            // Take screenshot after dismissing modal
+            await takeScreenshot(`after-dismissing-delete-modal${attempt > 1 ? `-retry-${attempt}` : ''}`);
           } else {
-            // Fallback: try Escape key
-            dlog(`"Go back" button not found, trying Escape key...`);
-            await page.keyboard.press('Escape');
-            await sleep(1000);
-            dlog(`✓ Dismissed delete modal using Escape key`);
+            dlog(`No delete modal detected (may have already been dismissed or not appeared)`);
           }
           
-          // Take screenshot after dismissing modal
-          await takeScreenshot('after-dismissing-delete-modal');
-        } else {
-          dlog(`No delete modal detected (may have already been dismissed or not appeared)`);
-        }
-        
-        // Verify the click worked by checking for "Book Customer" button
-        // This should be visible after dismissing the delete modal
-        await sleep(1000); // Wait for modal to fully load after dismissing delete modal
-        
-        const clickVerified = await page.evaluate(() => {
-          // Check for "Book Customer" button - this is the key indicator that booking dialog is open
-          const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
-            if (btn.offsetParent === null) return false;
-            const text = (btn.textContent || '').trim().toLowerCase();
-            return text === 'book customer' || text.includes('book customer');
-          });
+          // Verify the click worked by checking for "Book Customer" button
+          // This should be visible after dismissing the delete modal
+          await sleep(1000); // Wait for modal to fully load after dismissing delete modal
           
-          return {
-            bookCustomerButtonVisible: bookCustomerButton !== undefined,
-            bookCustomerButtonText: bookCustomerButton ? bookCustomerButton.textContent : null
-          };
-        }).catch(() => ({ bookCustomerButtonVisible: false, bookCustomerButtonText: null }));
-        
-        if (clickVerified.bookCustomerButtonVisible) {
-          dlog(`✓ Click verified - "Book Customer" button is visible: "${clickVerified.bookCustomerButtonText}"`);
-          logToFile(`✓ Booking dialog opened successfully - "Book Customer" button visible`);
-        } else {
-          logToFile(`⚠ WARNING: "Book Customer" button not found after dismissing delete modal`);
-          dlog(`⚠ WARNING: "Book Customer" button not found - booking dialog may not be fully loaded`);
-          // Wait a bit more and check again
-          await sleep(1000);
-          const retryCheck = await page.evaluate(() => {
+          const clickVerified = await page.evaluate(() => {
+            // Check for "Book Customer" button - this is the key indicator that booking dialog is open
             const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
               if (btn.offsetParent === null) return false;
               const text = (btn.textContent || '').trim().toLowerCase();
               return text === 'book customer' || text.includes('book customer');
             });
-            return bookCustomerButton !== undefined;
-          }).catch(() => false);
+            
+            return {
+              bookCustomerButtonVisible: bookCustomerButton !== undefined,
+              bookCustomerButtonText: bookCustomerButton ? bookCustomerButton.textContent : null
+            };
+          }).catch(() => ({ bookCustomerButtonVisible: false, bookCustomerButtonText: null }));
           
-          if (!retryCheck) {
-            logToFile(`❌ ERROR: "Book Customer" button still not found after retry`);
-            throw new Error(`Booking dialog did not open - "Book Customer" button not found`);
+          if (clickVerified.bookCustomerButtonVisible) {
+            dlog(`✓ Click verified - "Book Customer" button is visible: "${clickVerified.bookCustomerButtonText}"`);
+            logToFile(`✓ Booking dialog opened successfully - "Book Customer" button visible (attempt ${attempt})`);
+            classClickSuccess = true;
+            break; // Success! Exit retry loop
           } else {
-            dlog(`✓ "Book Customer" button found on retry`);
+            logToFile(`⚠ WARNING: "Book Customer" button not found after dismissing delete modal (attempt ${attempt})`);
+            dlog(`⚠ WARNING: "Book Customer" button not found - booking dialog may not be fully loaded`);
+            // Wait a bit more and check again
+            await sleep(1000);
+            const retryCheck = await page.evaluate(() => {
+              const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+                if (btn.offsetParent === null) return false;
+                const text = (btn.textContent || '').trim().toLowerCase();
+                return text === 'book customer' || text.includes('book customer');
+              });
+              return bookCustomerButton !== undefined;
+            }).catch(() => false);
+            
+            if (retryCheck) {
+              dlog(`✓ "Book Customer" button found on retry`);
+              logToFile(`✓ "Book Customer" button found on retry (attempt ${attempt})`);
+              classClickSuccess = true;
+              break; // Success! Exit retry loop
+            } else {
+              // Not found - will retry if attempts remain
+              if (attempt < MAX_CLASS_CLICK_RETRIES) {
+                logToFile(`⚠ "Book Customer" button not found - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
+                dlog(`⚠ "Book Customer" button not found - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
+                // Continue to next iteration (will go back to calendar)
+              } else {
+                logToFile(`❌ ERROR: "Book Customer" button still not found after ${MAX_CLASS_CLICK_RETRIES} attempts`);
+                throw new Error(`Booking dialog did not open - "Book Customer" button not found after ${MAX_CLASS_CLICK_RETRIES} attempts`);
+              }
+            }
           }
+        }
+        
+        if (!classClickSuccess) {
+          throw new Error(`Failed to open booking dialog after ${MAX_CLASS_CLICK_RETRIES} attempts`);
         }
         
         await sleep(500); // Final wait before proceeding
@@ -2564,9 +2611,59 @@ async function bookClass({
       await takeScreenshot('after-book-customer-click');
     });
 
-    // Step 8: Search for customer
+    // Step 8: Search for customer (with retry logic for Fitpass One through Twenty)
     await step("Search for customer", async () => {
-      const customerSearchValue = CUSTOMER_NAME.toLowerCase();
+      // Try Fitpass One, Two, Three, etc. up to Twenty
+      const MAX_CUSTOMER_RETRIES = 20;
+      let customerSelectedSuccessfully = false;
+      
+      for (let customerNumber = 1; customerNumber <= MAX_CUSTOMER_RETRIES; customerNumber++) {
+        const customerName = customerNumber === 1 ? "Fitpass One" : `Fitpass ${customerNumber === 2 ? "Two" : customerNumber === 3 ? "Three" : customerNumber === 4 ? "Four" : customerNumber === 5 ? "Five" : customerNumber === 6 ? "Six" : customerNumber === 7 ? "Seven" : customerNumber === 8 ? "Eight" : customerNumber === 9 ? "Nine" : customerNumber === 10 ? "Ten" : customerNumber === 11 ? "Eleven" : customerNumber === 12 ? "Twelve" : customerNumber === 13 ? "Thirteen" : customerNumber === 14 ? "Fourteen" : customerNumber === 15 ? "Fifteen" : customerNumber === 16 ? "Sixteen" : customerNumber === 17 ? "Seventeen" : customerNumber === 18 ? "Eighteen" : customerNumber === 19 ? "Nineteen" : "Twenty"}`;
+        const customerSearchValue = customerName.toLowerCase();
+        
+        if (customerNumber > 1) {
+          logToFile(`[CUSTOMER RETRY] Attempt ${customerNumber}: Trying "${customerName}"`);
+          dlog(`[CUSTOMER RETRY] Attempt ${customerNumber}: Trying "${customerName}"`);
+          
+          // Clear the input field before trying next customer
+          try {
+            const customerInputSelectors = [
+              '::-p-aria(Search customer)',
+              'div.customer-overlay input',
+              'input[placeholder*="customer" i]',
+              'input[placeholder*="Search" i]',
+              'input[type="text"]',
+              'input[type="search"]'
+            ];
+            
+            let inputElement = null;
+            for (const selector of customerInputSelectors) {
+              try {
+                const element = await page.$(selector).catch(() => null);
+                if (element) {
+                  const isVisible = await element.isVisible().catch(() => false);
+                  if (isVisible) {
+                    inputElement = element;
+                    break;
+                  }
+                }
+              } catch (e) {
+                continue;
+              }
+            }
+            
+            if (inputElement) {
+              await inputElement.click({ clickCount: 3 }); // Triple click to select all
+              await page.keyboard.press('Backspace');
+              await sleep(200);
+              dlog(`✓ Cleared input field for retry`);
+            }
+          } catch (e) {
+            dlog(`⚠ Could not clear input field: ${e?.message}`);
+          }
+        }
+        
+        dlog(`Typing customer name character by character: ${customerSearchValue}`);
       dlog(`Typing customer name character by character: ${customerSearchValue}`);
       
       // Take screenshot before searching for input field
@@ -2915,31 +3012,37 @@ async function bookClass({
         await sleep(2000);
         
         // Final check
-        const finalCheck = await page.evaluate(() => {
+        const finalCheck = await page.evaluate((customerNameParam) => {
           const allDivs = Array.from(document.querySelectorAll('div'));
+          const customerNameLower = customerNameParam.toLowerCase();
+          const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
           for (const div of allDivs) {
             if (div.offsetParent !== null) {
               const text = (div.textContent || '').toLowerCase();
-              if (text.includes('fitpass') && (text.includes('one') || text.includes('nadia'))) {
+              if (text.includes('fitpass') && text.includes(customerNumberWord)) {
                 return true;
               }
             }
           }
           return false;
-        }).catch(() => false);
+        }, customerName).catch(() => false);
         
         if (finalCheck) {
           dlog("✓ Autocomplete dropdown found on final check");
         } else {
           logToFile("❌ ERROR: Autocomplete dropdown not found even after extended wait");
+          // If autocomplete not found, try next customer
+          if (customerNumber < MAX_CUSTOMER_RETRIES) {
+            continue;
+          } else {
+            throw new Error(`Autocomplete dropdown not found for any customer after ${MAX_CUSTOMER_RETRIES} attempts`);
+          }
         }
       }
-    });
-
-    // Step 10: Select customer from results
-    await step("Select customer", async () => {
-      logToFile(`[CUSTOMER SELECTION] Starting customer selection. Current click count: ${clickCounter}`);
-      dlog(`[CUSTOMER SELECTION] Starting customer selection. Current click count: ${clickCounter}`);
+      
+      // Step 10: Select customer from results (inside retry loop)
+      logToFile(`[CUSTOMER SELECTION] Starting customer selection for "${customerName}". Current click count: ${clickCounter}`);
+      dlog(`[CUSTOMER SELECTION] Starting customer selection for "${customerName}". Current click count: ${clickCounter}`);
       const clicksBefore = clickCounter;
       
       // Take screenshot before selecting customer
@@ -2949,7 +3052,7 @@ async function bookClass({
       await sleep(1000);
       
       // First, verify autocomplete dropdown is visible and find clickable customer options
-      const dropdownCheck = await page.evaluate(() => {
+      const dropdownCheck = await page.evaluate((customerNameParam) => {
         // Look for customer options in dropdown - need to find actual clickable elements
         // First, find the autocomplete dropdown container
         const dropdownContainers = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"], div[class*="popover"]'));
@@ -2967,6 +3070,10 @@ async function bookClass({
         // Look for elements that contain customer names - be very specific
         const allElements = Array.from(searchRoot.querySelectorAll('div, li, span, p, a'));
         
+        // Extract the number part from customer name (e.g., "one", "two", "three", etc.)
+        const customerNameLower = customerNameParam.toLowerCase();
+        const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
+        
         for (const el of allElements) {
           if (el.offsetParent === null) continue;
           
@@ -2974,13 +3081,12 @@ async function bookClass({
           const text = (el.textContent || '').trim();
           const textLower = text.toLowerCase();
           
-          // CRITICAL: Look for "Fitpass one" or "Fitpass One" - must be SHORT (customer name, not entire page)
+          // CRITICAL: Look for the current customer name (e.g., "Fitpass One", "Fitpass Two", etc.)
           // Customer names should be less than 100 characters
           if (text.length > 100) continue; // Skip huge elements that contain entire page
           
-          // Look for "Fitpass" with "One" or "Nadia" - these are the actual customer names
-          if (textLower.includes('fitpass') && (textLower.includes('one') || textLower.includes('nadia'))) {
-            // Make sure it's not just "fitpass" alone - must have "one" or "nadia"
+          if (textLower.includes('fitpass') && textLower.includes(customerNumberWord)) {
+            // Make sure it's not just "fitpass" alone - must have the number word
             if (textLower === 'fitpass') continue; // Skip if it's just "fitpass"
             
             // Check if this element is within a dropdown/autocomplete container
@@ -3043,16 +3149,24 @@ async function bookClass({
           count: customerOptions.length,
           options: customerOptions
         };
-      }).catch(() => ({ found: false, count: 0, options: [] }));
+      }, customerName).catch(() => ({ found: false, count: 0, options: [] }));
       
       if (!dropdownCheck.found) {
-        logToFile(`❌ ERROR: Customer dropdown options not found! Cannot select customer.`);
-        dlog(`❌ ERROR: Customer dropdown options not found! Cannot select customer.`);
+        logToFile(`❌ ERROR: Customer dropdown options not found for "${customerName}"! Cannot select customer.`);
+        dlog(`❌ ERROR: Customer dropdown options not found for "${customerName}"! Cannot select customer.`);
         
         // Take screenshot for debugging
-        await takeScreenshot('customer-dropdown-not-found');
+        await takeScreenshot(`customer-dropdown-not-found-${customerNumber}`);
         
-        throw new Error(`Customer dropdown not visible - cannot select customer. Autocomplete may not have appeared.`);
+        // If this is not the last attempt, try next customer
+        if (customerNumber < MAX_CUSTOMER_RETRIES) {
+          logToFile(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
+          dlog(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
+          continue; // Try next customer
+        } else {
+          // Last attempt failed
+          throw new Error(`Customer dropdown not visible for any customer (1-${MAX_CUSTOMER_RETRIES}). Autocomplete may not have appeared.`);
+        }
       }
       
       dlog(`✓ Found ${dropdownCheck.count} customer option(s) in dropdown`);
@@ -3087,20 +3201,22 @@ async function bookClass({
           await sleep(1000);
           
           // Verify the click worked - check if customer was actually selected (not just typed)
-          const clickVerified = await page.evaluate(() => {
+          const clickVerified = await page.evaluate((customerNameParam) => {
             // Check if dropdown closed and customer name appears in a selected state
             const inputs = Array.from(document.querySelectorAll('input'));
+            const customerNameLower = customerNameParam.toLowerCase();
+            const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
             for (const input of inputs) {
               if (input.offsetParent === null) continue;
               const value = (input.value || '').trim();
               const valueLower = value.toLowerCase();
-              // If value contains "fitpass" and "one" or "nadia" (full customer name, not just "fitpass")
-              if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+              // If value contains the full customer name (not just "fitpass")
+              if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
                 return true;
               }
             }
             return false;
-          }).catch(() => false);
+          }, customerName).catch(() => false);
           
           if (clickVerified) {
             customerSelected = true;
@@ -3121,7 +3237,7 @@ async function bookClass({
         try {
           dlog(`[CUSTOMER SELECTION] Method 2: Trying text-based selector...`);
           await clickElement(page, [
-            `::-p-text(Fitpass One)`,
+            `::-p-text(${customerName})`,
             `::-p-text(Fitpass)`,
             'div.search-container > div > div',
             ':scope >>> div.search-container > div > div'
@@ -3129,18 +3245,20 @@ async function bookClass({
           
           // Wait and verify
           await sleep(1000);
-          const clickVerified = await page.evaluate(() => {
+          const clickVerified = await page.evaluate((customerNameParam) => {
             const inputs = Array.from(document.querySelectorAll('input'));
+            const customerNameLower = customerNameParam.toLowerCase();
+            const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
             for (const input of inputs) {
               if (input.offsetParent === null) continue;
               const value = (input.value || '').trim();
               const valueLower = value.toLowerCase();
-              if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+              if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
                 return true;
               }
             }
             return false;
-          }).catch(() => false);
+          }, customerName).catch(() => false);
           
           if (clickVerified) {
             customerSelected = true;
@@ -3160,7 +3278,7 @@ async function bookClass({
       if (!customerSelected) {
         try {
           dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click...`);
-          const clicked = await page.evaluate(() => {
+          const clicked = await page.evaluate((customerNameParam) => {
             // Find dropdown container first
             const dropdownContainers = Array.from(document.querySelectorAll('div[class*="dropdown"], div[class*="autocomplete"], div[class*="suggestion"], div[class*="popover"]'));
             const visibleDropdown = dropdownContainers.find(d => {
@@ -3176,6 +3294,9 @@ async function bookClass({
             let bestMatch = null;
             let smallestSize = Infinity;
             
+            const customerNameLower = customerNameParam.toLowerCase();
+            const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
+            
             for (const div of allDivs) {
               if (div.offsetParent === null) continue;
               const text = (div.textContent || '').trim();
@@ -3184,7 +3305,7 @@ async function bookClass({
               // Must be short (customer name, not entire page)
               if (text.length > 100) continue;
               
-              if (textLower.includes('fitpass') && (textLower.includes('one') || textLower.includes('nadia'))) {
+              if (textLower.includes('fitpass') && textLower.includes(customerNumberWord)) {
                 const rect = div.getBoundingClientRect();
                 const size = rect.width * rect.height;
                 
@@ -3201,22 +3322,24 @@ async function bookClass({
               return true;
             }
             return false;
-          }).catch(() => false);
+          }, customerName).catch(() => false);
           
           if (clicked) {
             await sleep(1000);
-            const clickVerified = await page.evaluate(() => {
+            const clickVerified = await page.evaluate((customerNameParam) => {
               const inputs = Array.from(document.querySelectorAll('input'));
+              const customerNameLower = customerNameParam.toLowerCase();
+              const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
               for (const input of inputs) {
                 if (input.offsetParent === null) continue;
                 const value = (input.value || '').trim();
                 const valueLower = value.toLowerCase();
-                if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+                if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
                   return true;
                 }
               }
               return false;
-            }).catch(() => false);
+            }, customerName).catch(() => false);
             
             if (clickVerified) {
               customerSelected = true;
@@ -3235,9 +3358,18 @@ async function bookClass({
       }
       
       if (!customerSelected) {
-        logToFile(`❌ ERROR: Failed to select customer using all methods!`);
-        await takeScreenshot('customer-selection-failed');
-        throw new Error(`Failed to select customer - all click methods failed`);
+        logToFile(`❌ ERROR: Failed to select customer "${customerName}" using all methods!`);
+        await takeScreenshot(`customer-selection-failed-${customerNumber}`);
+        
+        // If this is not the last attempt, try next customer
+        if (customerNumber < MAX_CUSTOMER_RETRIES) {
+          logToFile(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
+          dlog(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
+          continue; // Try next customer
+        } else {
+          // Last attempt failed
+          throw new Error(`Failed to select any customer (1-${MAX_CUSTOMER_RETRIES}) - all click methods failed`);
+        }
       }
       
       // Wait a bit for selection to register
@@ -3248,7 +3380,7 @@ async function bookClass({
       
       // STRICT VALIDATION: Verify customer was actually SELECTED (not just typed)
       // Check multiple indicators that customer was selected from dropdown
-      const customerSelectedCheck = await page.evaluate(() => {
+      const customerSelectedCheck = await page.evaluate((customerNameParam) => {
         const results = {
           customerInInput: false,
           customerInputValue: null,
@@ -3259,6 +3391,9 @@ async function bookClass({
           customerText: null,
           bookButtonText: null
         };
+        
+        const customerNameLower = customerNameParam.toLowerCase();
+        const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
         
         // Check 1: Customer name appears in input field
         const inputs = Array.from(document.querySelectorAll('input'));
@@ -3271,10 +3406,8 @@ async function bookClass({
             results.customerText = value;
             
             // CRITICAL: Check if the input value contains the full customer name (not just "fitpass")
-            // If it contains "fitpass one" or "fitpass nadia", it was likely selected
-            // If it's just "fitpass", it was likely just typed
             const valueLower = value.toLowerCase();
-            if (valueLower.includes('fitpass') && (valueLower.includes('one') || valueLower.includes('nadia'))) {
+            if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
               results.customerSelectedIndicator = true; // Full customer name suggests selection
             }
             break;
@@ -3311,7 +3444,7 @@ async function bookClass({
             // Look for full customer name (not just "fitpass") and must be SHORT (actual customer name, not entire page)
             if (text.length > 100) continue; // Skip huge elements
             
-            if (textLower.includes('fitpass') && (textLower.includes('one') || textLower.includes('nadia'))) {
+            if (textLower.includes('fitpass') && textLower.includes(customerNumberWord)) {
               // Check if this element is showing a selected customer (not in dropdown)
               const isSelectedDisplay = !el.closest('[class*="dropdown"]') && 
                                        !el.closest('[class*="autocomplete"]') &&
@@ -3351,7 +3484,7 @@ async function bookClass({
         results.dropdownClosed = visibleDropdowns.length === 0;
         
         return results;
-      }).catch(() => ({
+      }, customerName).catch(() => ({
         customerInInput: false,
         customerInputValue: null,
         customerNameVisible: false,
@@ -3385,23 +3518,37 @@ async function bookClass({
       const customerDefinitelySelected = customerSelectedCheck.customerSelectedIndicator;
       
       if (!customerDefinitelySelected) {
-        logToFile(`❌ ERROR: Customer selection validation FAILED!`);
+        logToFile(`❌ ERROR: Customer selection validation FAILED for "${customerName}"!`);
         logToFile(`  Customer was typed but NOT SELECTED from dropdown.`);
         logToFile(`  Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}"`);
-        logToFile(`  Expected: Full customer name (e.g., "Fitpass One") or BOOK USING CREDITS button visible`);
+        logToFile(`  Expected: Full customer name (e.g., "${customerName}") or BOOK USING CREDITS button visible`);
         logToFile(`  Actual: customerSelectedIndicator=${customerSelectedCheck.customerSelectedIndicator}`);
         
         // Take screenshot of failure state
-        await takeScreenshot('customer-selection-validation-failed');
+        await takeScreenshot(`customer-selection-validation-failed-${customerNumber}`);
         
-        throw new Error(`Customer selection validation failed - customer was typed but not selected from dropdown. Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}", BOOK button visible: ${customerSelectedCheck.bookButtonVisible}`);
+        // If this is not the last attempt, try next customer
+        if (customerNumber < MAX_CUSTOMER_RETRIES) {
+          logToFile(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
+          dlog(`⚠ Will try next customer (${customerNumber + 1}/${MAX_CUSTOMER_RETRIES})`);
+          continue; // Try next customer
+        } else {
+          // Last attempt failed
+          throw new Error(`Customer selection validation failed for all customers (1-${MAX_CUSTOMER_RETRIES}). Last attempt: "${customerName}", Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}", BOOK button visible: ${customerSelectedCheck.bookButtonVisible}`);
+        }
       }
       
-      logToFile(`✓ Customer selection VALIDATED successfully - customer was actually selected`);
-      dlog(`✓ Customer selection VALIDATED successfully - customer was actually selected`);
+      // Success! Customer was selected
+      logToFile(`✓ Customer selection VALIDATED successfully for "${customerName}" - customer was actually selected`);
+      dlog(`✓ Customer selection VALIDATED successfully for "${customerName}" - customer was actually selected`);
+      selectedCustomerName = customerName;
+      customerSelectedSuccessfully = true;
       
       // Take screenshot after successful validation
-      await takeScreenshot('after-customer-selection-validated');
+      await takeScreenshot(`after-customer-selection-validated-${customerName.replace(/\s+/g, '-')}`);
+      
+      // Break out of retry loop - we found a working customer
+      break;
       
       // Check if booking was automatically triggered
       const autoBookingCheck = await page.evaluate(() => {
@@ -3423,7 +3570,7 @@ async function bookClass({
       
       const clicksAfter = clickCounter;
       const clicksMade = clicksAfter - clicksBefore;
-      const customerLogMsg = `[CUSTOMER SELECTION] Completed. Clicks made: ${clicksMade}, Total clicks so far: ${clickCounter}`;
+      const customerLogMsg = `[CUSTOMER SELECTION] Completed for "${selectedCustomerName || customerName}". Clicks made: ${clicksMade}, Total clicks so far: ${clickCounter}`;
       logToFile(customerLogMsg);
       dlog(customerLogMsg);
       if (clicksMade > 1) {
@@ -3432,6 +3579,15 @@ async function bookClass({
         console.error(warningMsg);
       }
       await sleep(500); // Optimized: reduced from 1000ms
+      } // End of customer selection logic (inside retry loop)
+      
+      // Check if we successfully selected a customer
+      if (!customerSelectedSuccessfully) {
+        throw new Error(`Failed to select any customer after ${MAX_CUSTOMER_RETRIES} attempts (Fitpass One through Fitpass Twenty)`);
+      }
+      
+      logToFile(`✓ Successfully selected customer: "${selectedCustomerName}"`);
+      dlog(`✓ Successfully selected customer: "${selectedCustomerName}"`);
     });
 
     // Step 11: Wait for booking modal to fully load after selecting customer
@@ -3972,7 +4128,7 @@ async function bookClass({
     
     return {
       ok: true,
-      message: `Successfully booked class for ${CUSTOMER_NAME} on ${targetDate} at ${targetTime}`,
+      message: `Successfully booked class for ${selectedCustomerName || CUSTOMER_NAME} on ${targetDate} at ${targetTime}`,
       verified: bookingVerified,
       foundInReservations: bookingFoundInReservations,
       chargeStepCompleted: chargeStepCompleted,
