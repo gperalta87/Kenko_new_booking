@@ -1170,14 +1170,23 @@ async function bookClass({
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
     await step("Enter gym location", async () => {
-      // Wait for page to stabilize after navigation
-      await sleep(2000);
+      // Wait for page to stabilize after navigation - longer wait to avoid detection
+      // Simulate human reading/thinking time
+      await sleep(3000 + Math.random() * 2000);
+      
+      // Simulate human-like mouse movement before interacting
+      try {
+        await simulateHumanBehavior();
+      } catch (e) {
+        dlog(`Human behavior simulation failed (non-critical): ${e?.message}`);
+      }
       
       // Don't check page.url() - it might trigger detection
       // Instead, directly try to find and interact with the input field
       // This is more resilient to frame detachment
       
       // Wait for the input field to be visible - use the same selector as reference
+      // Use longer timeout to give page more time to load
       // Reference code uses: input[placeholder*="Search for your business"]
       dlog("Waiting for gym name input field");
       
@@ -1202,7 +1211,7 @@ async function bookClass({
       for (const selector of inputSelectors) {
         try {
           dlog(`Waiting for input with selector: ${selector}`);
-          await page.waitForSelector(selector, { visible: true, timeout: 2000 });
+          await page.waitForSelector(selector, { visible: true, timeout: 5000 });
           const elements = await page.$$(selector);
           
           for (const element of elements) {
