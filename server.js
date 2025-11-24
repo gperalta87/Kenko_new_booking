@@ -1136,12 +1136,12 @@ async function bookClass({
       }
       
       // Verify stealth is working - check if webdriver is hidden
-      // Wrap in try-catch to handle detached frame errors
+      // This is optional - if frame is detached, we'll skip it and continue
+      // Frame detachment during navigation is normal, so we don't throw errors
       let webdriverCheck = null;
       try {
-        // Check if page is still valid before evaluating
-        const pageUrl = page.url();
-        dlog(`Page URL before stealth check: ${pageUrl}`);
+        // Wait a bit before checking to let page stabilize
+        await sleep(500);
         
         webdriverCheck = await page.evaluate(() => {
           return {
@@ -1155,25 +1155,14 @@ async function bookClass({
         dlog(`Stealth check: webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
         logToFile(`[STEALTH] webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
       } catch (evalError) {
-        dlog(`⚠ Stealth check failed (page may have navigated): ${evalError?.message}`);
-        logToFile(`⚠ Stealth check failed: ${evalError?.message}`);
-        // If frame detached, throw error
-        if (evalError.message.includes("detached") || evalError.message.includes("closed")) {
-          throw new Error(`Page frame detached after navigation: ${evalError?.message}`);
-        }
-        // Continue anyway - stealth plugin should still be active
+        dlog(`⚠ Stealth check skipped (non-critical): ${evalError?.message}`);
+        logToFile(`⚠ Stealth check skipped: ${evalError?.message}`);
+        // Don't throw error - frame detachment is normal during navigation
+        // The stealth plugin is still active, so we can continue
       }
       
       // Additional wait for page to fully render and scripts to load
       await sleep(1000);
-      
-      // Final check that page is still valid before proceeding
-      try {
-        const finalUrl = page.url();
-        dlog(`Final page URL check: ${finalUrl}`);
-      } catch (e) {
-        throw new Error(`Page became invalid before proceeding: ${e?.message}`);
-      }
     });
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
