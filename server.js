@@ -2823,62 +2823,138 @@ async function bookClass({
       page.on('request', requestHandler);
       page.on('response', responseHandler);
       
-      // Use Locator API with .fill() like the recording shows - this properly triggers autocomplete
-      dlog(`Filling customer name using Locator API .fill(): "${customerName}"`);
-      try {
-        // Use the Locator API which supports .fill() method (as shown in recording)
-        const locator = page.locator(foundInputSelector);
-        await locator.fill(customerName);
+      // CRITICAL: Use character-by-character typing with FULL event sequence (like gym selection)
+      // This simulates REAL human typing to trigger autocomplete API properly
+      dlog(`Typing customer name "${customerName}" with full event sequence (ultra-realistic)...`);
+      
+      // Ensure input is focused and ready
+      await foundInputElement.click();
+      await sleep(150);
+      await foundInputElement.focus();
+      await sleep(150);
+      
+      // Clear any existing value first
+      await foundInputElement.click({ clickCount: 3 });
+      await page.keyboard.press('Backspace');
+      await sleep(100);
+      
+      // Trigger focus events to ensure autocomplete is listening
+      await page.evaluate((selector) => {
+        const input = document.querySelector(selector);
+        if (input) {
+          input.focus();
+          input.dispatchEvent(new Event('focus', { bubbles: true }));
+          input.dispatchEvent(new Event('click', { bubbles: true }));
+          input.dispatchEvent(new Event('mousedown', { bubbles: true }));
+          input.dispatchEvent(new Event('mouseup', { bubbles: true }));
+        }
+      }, browserSelector);
+      await sleep(150);
+      
+      const customerNameLower = customerName.toLowerCase();
+      
+      // Type each character with FULL event sequence (keydown -> keypress -> keyboard.type -> input -> keyup)
+      for (let i = 0; i < customerNameLower.length; i++) {
+        const char = customerNameLower[i];
+        const charCode = char.charCodeAt(0);
         
-        // Small delay to allow the fill to register
-        await sleep(100);
+        // Generate random delay between characters (realistic typing speed)
+        const baseDelay = 50 + Math.random() * 50;
+        const occasionalPause = Math.random() < 0.05 ? 100 : 0; // 5% chance of longer pause
+        const delay = baseDelay + occasionalPause;
         
-        // Manually trigger input event to ensure autocomplete fires (like gym selection)
+        dlog(`Typing character ${i+1}/${customerNameLower.length}: "${char}" (delay: ${Math.round(delay)}ms)`);
+        
+        // FULL EVENT SEQUENCE for each character (like a real human):
+        // 1. KeyDown event
+        await page.evaluate((selector, char, charCode) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const keyDownEvent = new KeyboardEvent('keydown', {
+              key: char,
+              code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+              keyCode: charCode,
+              which: charCode,
+              bubbles: true,
+              cancelable: true
+            });
+            input.dispatchEvent(keyDownEvent);
+          }
+        }, browserSelector, char, charCode);
+        await sleep(20 + Math.random() * 30);
+        
+        // 2. KeyPress event
+        await page.evaluate((selector, char, charCode) => {
+          const input = document.querySelector(selector);
+          if (input) {
+            const keyPressEvent = new KeyboardEvent('keypress', {
+              key: char,
+              code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+              keyCode: charCode,
+              which: charCode,
+              bubbles: true,
+              cancelable: true
+            });
+            input.dispatchEvent(keyPressEvent);
+          }
+        }, browserSelector, char, charCode);
+        await sleep(15 + Math.random() * 15);
+        
+        // 3. Actually type the character using keyboard (this sets the value)
+        await page.keyboard.type(char, { delay: 0 }); // No delay here, we control timing manually
+        
+        // 4. Input event (fires when value changes)
         await page.evaluate((selector) => {
           const input = document.querySelector(selector);
           if (input) {
-            // Trigger input event to ensure autocomplete API is called
             const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+            Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
             input.dispatchEvent(inputEvent);
-            
-            // Also trigger change event
-            const changeEvent = new Event('change', { bubbles: true, cancelable: true });
-            input.dispatchEvent(changeEvent);
-            
-            // Trigger keyup event (some autocomplete libraries listen to this)
-            const keyupEvent = new KeyboardEvent('keyup', { bubbles: true, cancelable: true });
-            input.dispatchEvent(keyupEvent);
           }
         }, browserSelector);
+        await sleep(20 + Math.random() * 30);
         
-        dlog("✓ Finished filling customer name using Locator API");
-      } catch (e) {
-        // Fallback: if Locator API fails, use type() with small delays to trigger autocomplete
-        dlog(`Locator API failed, using type() with delays: ${e?.message}`);
-        await foundInputElement.click();
-        await sleep(200);
-        await foundInputElement.focus();
-        await sleep(200);
-        
-        // Clear the input first
-        await foundInputElement.click({ clickCount: 3 });
-        await page.keyboard.press('Backspace');
-        await sleep(100);
-        
-        // Type with small delays to trigger autocomplete (50-100ms per character)
-        await foundInputElement.type(customerName, { delay: 50 + Math.random() * 50 });
-        
-        // Trigger input event after typing
-        await page.evaluate((selector) => {
+        // 5. KeyUp event
+        await page.evaluate((selector, char, charCode) => {
           const input = document.querySelector(selector);
           if (input) {
-            const inputEvent = new Event('input', { bubbles: true, cancelable: true });
-            input.dispatchEvent(inputEvent);
+            const keyUpEvent = new KeyboardEvent('keyup', {
+              key: char,
+              code: char.match(/[a-z]/i) ? `Key${char.toUpperCase()}` : char,
+              keyCode: charCode,
+              which: charCode,
+              bubbles: true,
+              cancelable: true
+            });
+            input.dispatchEvent(keyUpEvent);
           }
-        }, browserSelector);
+        }, browserSelector, char, charCode);
         
-        dlog("✓ Finished typing customer name with delays");
+        // Wait between characters - give autocomplete API time to process
+        const waitTime = i < 3 ? 150 + Math.random() * 100 : 100 + Math.random() * 100;
+        await sleep(waitTime);
       }
+      
+      // Final input event to ensure autocomplete fires one more time
+      await page.evaluate((selector) => {
+        const input = document.querySelector(selector);
+        if (input) {
+          const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+          Object.defineProperty(inputEvent, 'target', { value: input, enumerable: true });
+          input.dispatchEvent(inputEvent);
+          
+          // Also trigger compositionend (for autocomplete systems that listen to it)
+          const compositionEndEvent = new CompositionEvent('compositionend', { bubbles: true });
+          input.dispatchEvent(compositionEndEvent);
+          
+          // Trigger change event
+          const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+          input.dispatchEvent(changeEvent);
+        }
+      }, browserSelector);
+      await sleep(200);
+      
+      dlog("✓ Finished typing customer name with full event sequence");
       
       // Wait for network requests to complete and autocomplete dropdown to appear
       // Keep network listeners active to catch autocomplete API requests
@@ -4154,13 +4230,31 @@ async function bookClass({
     };
 
   } catch (err) {
-    await page.close().catch(() => {});
-    await browser.close().catch(() => {});
-    
     const errorMessage = err?.message || String(err);
     logToFile(`[ERROR] Booking failed: ${errorMessage}`);
     logToFile(`[ERROR] Stack: ${err?.stack || 'No stack trace'}`);
+    console.error(`[ERROR] Booking failed: ${errorMessage}`);
     
+    // Close browser in background (don't wait for it) - response must be sent immediately
+    const closeBrowser = async () => {
+      try {
+        // Use Promise.race with timeout to ensure we don't hang
+        await Promise.race([
+          Promise.all([
+            page.close().catch(() => {}),
+            browser.close().catch(() => {})
+          ]),
+          new Promise(resolve => setTimeout(resolve, 2000)) // Max 2 seconds for cleanup
+        ]);
+      } catch (e) {
+        // Ignore all errors - we've already logged the main error
+      }
+    };
+    
+    // Don't await - let it run in background
+    closeBrowser().catch(() => {});
+    
+    // Return error response immediately (don't wait for browser cleanup)
     return {
       ok: false,
       error: errorMessage,
@@ -4275,6 +4369,13 @@ app.post("/book", async (req, res) => {
       console.log(`[RESPONSE] Screenshots: ${result.screenshots?.length || 0}`);
       console.log(`[RESPONSE] Click count: ${result.clickCount || 0}`);
       return res.status(500).json(result);
+    } else {
+      // Response already sent by watchdog, but log the result
+      console.log(`[RESPONSE] Result received but response already sent (watchdog fired)`);
+      console.log(`[RESPONSE] Result: ${result.ok ? 'SUCCESS' : 'FAILED'}`);
+      if (!result.ok) {
+        console.log(`[RESPONSE] Error: ${result.error}`);
+      }
     }
   } catch (err) {
     console.error(`[ERROR] Endpoint error: ${err?.message || err}`);
@@ -4282,10 +4383,14 @@ app.post("/book", async (req, res) => {
     if (!done.sent) {
       clearTimeout(watchdog);
       done.sent = true;
-      return res.status(500).json({
+      const errorResponse = {
         ok: false,
         error: String(err?.message || err)
-      });
+      };
+      console.log(`[RESPONSE] Sending error response: ${JSON.stringify(errorResponse)}`);
+      return res.status(500).json(errorResponse);
+    } else {
+      console.log(`[ERROR] Error occurred but response already sent (watchdog fired)`);
     }
   }
 });
