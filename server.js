@@ -550,45 +550,51 @@ async function bookClass({
   // Override navigator properties to match local Chrome (not headless)
   // Enhanced fingerprinting to appear as real browser session on a real Mac (not VM)
   await page.evaluateOnNewDocument(() => {
-    // Override platform to match local Mac
-    Object.defineProperty(navigator, 'platform', {
-      get: () => 'MacIntel',
-    });
-    
-    // Override hardwareConcurrency to match real Mac (VMs often show different values)
-    Object.defineProperty(navigator, 'hardwareConcurrency', {
-      get: () => 8, // Common Mac value (not typical VM values like 2 or 4)
-    });
-    
-    // Override deviceMemory to match real Mac (VMs often show lower values)
-    Object.defineProperty(navigator, 'deviceMemory', {
-      get: () => 8, // Real Mac typically has 8GB+ (VMs often show 2-4GB)
-    });
-    
-    // Override maxTouchPoints (Macs don't have touch, VMs might report different)
-    Object.defineProperty(navigator, 'maxTouchPoints', {
-      get: () => 0, // Mac doesn't have touch
-    });
-    
-    // Override screen properties to match real Mac (prevent VM detection)
-    Object.defineProperty(screen, 'width', {
-      get: () => 1920,
-    });
-    Object.defineProperty(screen, 'height', {
-      get: () => 1080,
-    });
-    Object.defineProperty(screen, 'availWidth', {
-      get: () => 1920,
-    });
-    Object.defineProperty(screen, 'availHeight', {
-      get: () => 1055, // Account for menu bar
-    });
-    Object.defineProperty(screen, 'colorDepth', {
-      get: () => 24, // Real Mac color depth
-    });
-    Object.defineProperty(screen, 'pixelDepth', {
-      get: () => 24,
-    });
+    // Wrap everything in try-catch to prevent any errors from crashing the page
+    try {
+      // Override platform to match local Mac
+      if (navigator) {
+        Object.defineProperty(navigator, 'platform', {
+          get: () => 'MacIntel',
+        });
+        
+        // Override hardwareConcurrency to match real Mac (VMs often show different values)
+        Object.defineProperty(navigator, 'hardwareConcurrency', {
+          get: () => 8, // Common Mac value (not typical VM values like 2 or 4)
+        });
+        
+        // Override deviceMemory to match real Mac (VMs often show lower values)
+        Object.defineProperty(navigator, 'deviceMemory', {
+          get: () => 8, // Real Mac typically has 8GB+ (VMs often show 2-4GB)
+        });
+        
+        // Override maxTouchPoints (Macs don't have touch, VMs might report different)
+        Object.defineProperty(navigator, 'maxTouchPoints', {
+          get: () => 0, // Mac doesn't have touch
+        });
+      }
+      
+      // Override screen properties to match real Mac (prevent VM detection)
+      if (typeof screen !== 'undefined' && screen) {
+        Object.defineProperty(screen, 'width', {
+          get: () => 1920,
+        });
+        Object.defineProperty(screen, 'height', {
+          get: () => 1080,
+        });
+        Object.defineProperty(screen, 'availWidth', {
+          get: () => 1920,
+        });
+        Object.defineProperty(screen, 'availHeight', {
+          get: () => 1055, // Account for menu bar
+        });
+        Object.defineProperty(screen, 'colorDepth', {
+          get: () => 24, // Real Mac color depth
+        });
+        Object.defineProperty(screen, 'pixelDepth', {
+          get: () => 24,
+        });
+      }
     
     // Override timezone to match Mac (VMs often use UTC)
     // This is critical - VMs are often detected by timezone mismatches
@@ -604,143 +610,161 @@ async function bookClass({
       // Silently fail if timezone override doesn't work
     }
     
-    // Override webdriver to ensure it's undefined (stealth plugin should do this, but double-check)
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => undefined,
-    });
-    
-    // Override languages to match real browser
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['en-US', 'en'],
-    });
-    
-    // Override vendor to match Chrome
-    Object.defineProperty(navigator, 'vendor', {
-      get: () => 'Google Inc.',
-    });
-    
-    // Override appVersion to match Chrome
-    Object.defineProperty(navigator, 'appVersion', {
-      get: () => '5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-    });
-    
-    // Override connection properties (if available)
-    if (navigator.connection) {
-      Object.defineProperty(navigator.connection, 'rtt', {
-        get: () => 50,
-      });
-      Object.defineProperty(navigator.connection, 'downlink', {
-        get: () => 10,
-      });
-      Object.defineProperty(navigator.connection, 'effectiveType', {
-        get: () => '4g',
-      });
-    }
-    
-    // Override plugins to show realistic plugins (Chrome typically has 5 plugins)
-    Object.defineProperty(navigator, 'plugins', {
-      get: () => {
-        const plugins = [];
-        // Create realistic plugin objects
-        for (let i = 0; i < 5; i++) {
-          plugins.push({
-            name: `Plugin ${i + 1}`,
-            description: 'Plugin description',
-            filename: 'internal-pdf-viewer',
-            length: 1
+      // Override webdriver to ensure it's undefined (stealth plugin should do this, but double-check)
+      if (navigator) {
+        Object.defineProperty(navigator, 'webdriver', {
+          get: () => undefined,
+        });
+        
+        // Override languages to match real browser
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['en-US', 'en'],
+        });
+        
+        // Override vendor to match Chrome
+        Object.defineProperty(navigator, 'vendor', {
+          get: () => 'Google Inc.',
+        });
+        
+        // Override appVersion to match Chrome
+        Object.defineProperty(navigator, 'appVersion', {
+          get: () => '5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        });
+        
+        // Override connection properties (if available)
+        if (navigator.connection) {
+          Object.defineProperty(navigator.connection, 'rtt', {
+            get: () => 50,
+          });
+          Object.defineProperty(navigator.connection, 'downlink', {
+            get: () => 10,
+          });
+          Object.defineProperty(navigator.connection, 'effectiveType', {
+            get: () => '4g',
           });
         }
-        return plugins;
-      },
-    });
-    
-    // Override mimeTypes to match plugins
-    Object.defineProperty(navigator, 'mimeTypes', {
-      get: () => {
-        const mimeTypes = [];
-        for (let i = 0; i < 5; i++) {
-          mimeTypes.push({
-            type: 'application/pdf',
-            suffixes: 'pdf',
-            description: 'PDF Document',
-            enabledPlugin: navigator.plugins[i] || null
-          });
-        }
-        return mimeTypes;
-      },
-    });
-    
-    // Add Chrome-specific properties (must match real Chrome)
-    window.chrome = {
-      runtime: {},
-      loadTimes: function() {
-        return {
-          commitLoadTime: Date.now() / 1000 - Math.random() * 2,
-          connectionInfo: 'http/1.1',
-          finishDocumentLoadTime: Date.now() / 1000 - Math.random(),
-          finishLoadTime: Date.now() / 1000 - Math.random() * 0.5,
-          firstPaintAfterLoadTime: 0,
-          firstPaintTime: Date.now() / 1000 - Math.random() * 1.5,
-          navigationType: 'Other',
-          npnNegotiatedProtocol: 'unknown',
-          requestTime: Date.now() / 1000 - Math.random() * 3,
-          startLoadTime: Date.now() / 1000 - Math.random() * 3,
-          wasAlternateProtocolAvailable: false,
-          wasFetchedViaSpdy: false,
-          wasNpnNegotiated: false
+        
+        // Override plugins to show realistic plugins (Chrome typically has 5 plugins)
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => {
+            const plugins = [];
+            // Create realistic plugin objects
+            for (let i = 0; i < 5; i++) {
+              plugins.push({
+                name: `Plugin ${i + 1}`,
+                description: 'Plugin description',
+                filename: 'internal-pdf-viewer',
+                length: 1
+              });
+            }
+            return plugins;
+          },
+        });
+        
+        // Override mimeTypes to match plugins
+        Object.defineProperty(navigator, 'mimeTypes', {
+          get: () => {
+            const mimeTypes = [];
+            for (let i = 0; i < 5; i++) {
+              mimeTypes.push({
+                type: 'application/pdf',
+                suffixes: 'pdf',
+                description: 'PDF Document',
+                enabledPlugin: navigator.plugins[i] || null
+              });
+            }
+            return mimeTypes;
+          },
+        });
+      }
+      
+      // Add Chrome-specific properties (must match real Chrome)
+      if (typeof window !== 'undefined') {
+        window.chrome = {
+          runtime: {},
+          loadTimes: function() {
+            return {
+              commitLoadTime: Date.now() / 1000 - Math.random() * 2,
+              connectionInfo: 'http/1.1',
+              finishDocumentLoadTime: Date.now() / 1000 - Math.random(),
+              finishLoadTime: Date.now() / 1000 - Math.random() * 0.5,
+              firstPaintAfterLoadTime: 0,
+              firstPaintTime: Date.now() / 1000 - Math.random() * 1.5,
+              navigationType: 'Other',
+              npnNegotiatedProtocol: 'unknown',
+              requestTime: Date.now() / 1000 - Math.random() * 3,
+              startLoadTime: Date.now() / 1000 - Math.random() * 3,
+              wasAlternateProtocolAvailable: false,
+              wasFetchedViaSpdy: false,
+              wasNpnNegotiated: false
+            };
+          },
+          csi: function() {
+            return {
+              startE: Date.now() - Math.random() * 1000,
+              onloadT: Date.now() - Math.random() * 500,
+              pageT: Math.random() * 1000 + 500,
+              tran: 15
+            };
+          },
+          app: {
+            isInstalled: false,
+            InstallState: {
+              DISABLED: 'disabled',
+              INSTALLED: 'installed',
+              NOT_INSTALLED: 'not_installed'
+            },
+            RunningState: {
+              CANNOT_RUN: 'cannot_run',
+              READY_TO_RUN: 'ready_to_run',
+              RUNNING: 'running'
+            }
+          }
         };
-      },
-      csi: function() {
-        return {
-          startE: Date.now() - Math.random() * 1000,
-          onloadT: Date.now() - Math.random() * 500,
-          pageT: Math.random() * 1000 + 500,
-          tran: 15
-        };
-      },
-      app: {
-        isInstalled: false,
-        InstallState: {
-          DISABLED: 'disabled',
-          INSTALLED: 'installed',
-          NOT_INSTALLED: 'not_installed'
-        },
-        RunningState: {
-          CANNOT_RUN: 'cannot_run',
-          READY_TO_RUN: 'ready_to_run',
-          RUNNING: 'running'
+        
+        // Remove automation detection variables
+        try {
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+          delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
+        } catch (e) {
+          // Silently fail if delete doesn't work
         }
       }
-    };
-    
-    // Remove automation detection variables
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
-    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
     
     // Override permissions API to return realistic values
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) => (
-      parameters.name === 'notifications' ?
-        Promise.resolve({ state: Notification.permission }) :
-        originalQuery(parameters)
-    );
+    try {
+      if (window && window.navigator && window.navigator.permissions && window.navigator.permissions.query) {
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+          parameters.name === 'notifications' ?
+            Promise.resolve({ state: Notification.permission }) :
+            originalQuery(parameters)
+        );
+      }
+    } catch (e) {
+      // Silently fail if permissions override doesn't work
+    }
     
     // Override getBattery to return realistic values (Mac-like)
-    if (navigator.getBattery) {
-      navigator.getBattery = () => Promise.resolve({
-        charging: true,
-        chargingTime: 0,
-        dischargingTime: Infinity,
-        level: 1,
-        onchargingchange: null,
-        onchargingtimechange: null,
-        ondischargingtimechange: null,
-        onlevelchange: null
-      });
+    try {
+      if (navigator && navigator.getBattery) {
+        navigator.getBattery = () => Promise.resolve({
+          charging: true,
+          chargingTime: 0,
+          dischargingTime: Infinity,
+          level: 1,
+          onchargingchange: null,
+          onchargingtimechange: null,
+          ondischargingtimechange: null,
+          onlevelchange: null
+        });
+      }
+    } catch (e) {
+      // Silently fail if getBattery override doesn't work
     }
     
     // Override WebGL to prevent VM detection via renderer info
@@ -894,17 +918,27 @@ async function bookClass({
     }
     
     // Override permissions to prevent VM detection via permission queries
-    const originalPermissionsQuery = navigator.permissions.query;
-    navigator.permissions.query = function(parameters) {
-      // Return realistic permission states for Mac
-      if (parameters.name === 'notifications') {
-        return Promise.resolve({ state: 'default' });
+    try {
+      if (navigator && navigator.permissions && navigator.permissions.query) {
+        const originalPermissionsQuery = navigator.permissions.query;
+        navigator.permissions.query = function(parameters) {
+          // Return realistic permission states for Mac
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: 'default' });
+          }
+          if (parameters.name === 'geolocation') {
+            return Promise.resolve({ state: 'prompt' });
+          }
+          return originalPermissionsQuery.call(this, parameters);
+        };
       }
-      if (parameters.name === 'geolocation') {
-        return Promise.resolve({ state: 'prompt' });
-      }
-      return originalPermissionsQuery.call(this, parameters);
-    };
+    } catch (e) {
+      // Silently fail if permissions override doesn't work
+    }
+    } catch (globalError) {
+      // Catch any unhandled errors in evaluateOnNewDocument to prevent page crash
+      console.error('[VM EVASION] Error in evaluateOnNewDocument:', globalError);
+    }
   });
   
   // Add human-like mouse movements and scrolling behavior
