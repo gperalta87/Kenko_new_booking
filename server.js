@@ -2648,14 +2648,14 @@ async function bookClass({
             }).catch(() => false);
             
             if (dismissed) {
-              await sleep(1000);
+              await sleep(1500); // Increased from 1000ms to 1500ms
               dlog(`✓ Successfully dismissed delete modal by clicking "Go back"`);
               logToFile(`✓ Successfully dismissed delete modal`);
             } else {
               // Fallback: try Escape key
               dlog(`"Go back" button not found, trying Escape key...`);
               await page.keyboard.press('Escape');
-              await sleep(1000);
+              await sleep(1500); // Increased from 1000ms to 1500ms
               dlog(`✓ Dismissed delete modal using Escape key`);
             }
             
@@ -2667,56 +2667,82 @@ async function bookClass({
           
           // Verify the click worked by checking for "Book Customer" button
           // This should be visible after dismissing the delete modal
-          await sleep(1000); // Wait for modal to fully load after dismissing delete modal
+          // Wait longer for the booking dialog to fully load (especially after 403 errors)
+          dlog(`Waiting for booking dialog to load after dismissing delete modal...`);
+          await sleep(2000); // Increased from 1000ms to 2000ms
           
-          const clickVerified = await page.evaluate(() => {
-            // Check for "Book Customer" button - this is the key indicator that booking dialog is open
-            const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
-              if (btn.offsetParent === null) return false;
-              const text = (btn.textContent || '').trim().toLowerCase();
-              return text === 'book customer' || text.includes('book customer');
+          // Wait for network idle to ensure all resources are loaded
+          try {
+            await page.waitForNetworkIdle({ idleTime: 500, timeout: 3000 }).catch(() => {
+              dlog(`Network idle wait timed out, continuing...`);
             });
-            
-            return {
-              bookCustomerButtonVisible: bookCustomerButton !== undefined,
-              bookCustomerButtonText: bookCustomerButton ? bookCustomerButton.textContent : null
-            };
-          }).catch(() => ({ bookCustomerButtonVisible: false, bookCustomerButtonText: null }));
+          } catch (e) {
+            dlog(`Network idle wait error: ${e?.message}`);
+          }
           
-          if (clickVerified.bookCustomerButtonVisible) {
-            dlog(`✓ Click verified - "Book Customer" button is visible: "${clickVerified.bookCustomerButtonText}"`);
-            logToFile(`✓ Booking dialog opened successfully - "Book Customer" button visible (attempt ${attempt})`);
+          // Try multiple times with progressive waits to find the "Book Customer" button
+          let bookCustomerFound = false;
+          for (let checkAttempt = 0; checkAttempt < 5; checkAttempt++) {
+            await sleep(500 + checkAttempt * 500); // Progressive wait: 500ms, 1000ms, 1500ms, 2000ms, 2500ms
+            
+            const clickVerified = await page.evaluate(() => {
+              // Try multiple selectors for "Book Customer" button
+              const selectors = [
+                'button',
+                '[role="button"]',
+                'div.booking-btn button',
+                'div.booking-btn > button',
+                'button[class*="booking"]',
+                'button[class*="customer"]'
+              ];
+              
+              for (const selector of selectors) {
+                const buttons = Array.from(document.querySelectorAll(selector));
+                for (const btn of buttons) {
+                  if (btn.offsetParent === null) continue;
+                  const text = (btn.textContent || '').trim().toLowerCase();
+                  if (text === 'book customer' || text.includes('book customer')) {
+                    return {
+                      bookCustomerButtonVisible: true,
+                      bookCustomerButtonText: btn.textContent,
+                      selector: selector
+                    };
+                  }
+                }
+              }
+              
+              return {
+                bookCustomerButtonVisible: false,
+                bookCustomerButtonText: null,
+                selector: null
+              };
+            }).catch(() => ({ bookCustomerButtonVisible: false, bookCustomerButtonText: null, selector: null }));
+            
+            if (clickVerified.bookCustomerButtonVisible) {
+              dlog(`✓ Click verified - "Book Customer" button is visible: "${clickVerified.bookCustomerButtonText}" (found with selector: ${clickVerified.selector})`);
+              logToFile(`✓ Booking dialog opened successfully - "Book Customer" button visible (attempt ${attempt}, check ${checkAttempt + 1})`);
+              bookCustomerFound = true;
+              break;
+            } else {
+              dlog(`  Check ${checkAttempt + 1}/5: "Book Customer" button not found yet, waiting...`);
+            }
+          }
+          
+          if (bookCustomerFound) {
             classClickSuccess = true;
             break; // Success! Exit retry loop
           } else {
             logToFile(`⚠ WARNING: "Book Customer" button not found after dismissing delete modal (attempt ${attempt})`);
             dlog(`⚠ WARNING: "Book Customer" button not found - booking dialog may not be fully loaded`);
-            // Wait a bit more and check again
-            await sleep(1000);
-            const retryCheck = await page.evaluate(() => {
-              const bookCustomerButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
-                if (btn.offsetParent === null) return false;
-                const text = (btn.textContent || '').trim().toLowerCase();
-                return text === 'book customer' || text.includes('book customer');
-              });
-              return bookCustomerButton !== undefined;
-            }).catch(() => false);
             
-            if (retryCheck) {
-              dlog(`✓ "Book Customer" button found on retry`);
-              logToFile(`✓ "Book Customer" button found on retry (attempt ${attempt})`);
-              classClickSuccess = true;
-              break; // Success! Exit retry loop
+            // Not found - will retry if attempts remain
+            if (attempt < MAX_CLASS_CLICK_RETRIES) {
+              logToFile(`⚠ "Book Customer" button not found - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
+              dlog(`⚠ "Book Customer" button not found - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
+              // Continue to next iteration (will go back to calendar)
             } else {
-              // Not found - will retry if attempts remain
-              if (attempt < MAX_CLASS_CLICK_RETRIES) {
-                logToFile(`⚠ "Book Customer" button not found - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
-                dlog(`⚠ "Book Customer" button not found - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
-                // Continue to next iteration (will go back to calendar)
-              } else {
-                logToFile(`❌ ERROR: "Book Customer" button still not found after ${MAX_CLASS_CLICK_RETRIES} attempts`);
-                throw new Error(`Booking dialog did not open - "Book Customer" button not found after ${MAX_CLASS_CLICK_RETRIES} attempts`);
-              }
+              logToFile(`❌ ERROR: "Book Customer" button still not found after ${MAX_CLASS_CLICK_RETRIES} attempts`);
+              throw new Error(`Booking dialog did not open - "Book Customer" button not found after ${MAX_CLASS_CLICK_RETRIES} attempts`);
             }
           }
         }
