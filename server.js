@@ -739,11 +739,16 @@ async function bookClass({
     try {
       if (window && window.navigator && window.navigator.permissions && window.navigator.permissions.query) {
         const originalQuery = window.navigator.permissions.query;
-        window.navigator.permissions.query = (parameters) => (
-          parameters.name === 'notifications' ?
-            Promise.resolve({ state: Notification.permission }) :
-            originalQuery(parameters)
-        );
+        window.navigator.permissions.query = (parameters) => {
+          // Return realistic permission states
+          if (parameters.name === 'notifications') {
+            return Promise.resolve({ state: 'default' });
+          }
+          if (parameters.name === 'geolocation') {
+            return Promise.resolve({ state: 'prompt' });
+          }
+          return originalQuery.call(this, parameters);
+        };
       }
     } catch (e) {
       // Silently fail if permissions override doesn't work
@@ -802,28 +807,12 @@ async function bookClass({
     
     // Override Canvas fingerprinting to prevent VM detection
     // VMs often produce different canvas fingerprints
+    // NOTE: Simplified to avoid potential errors - just pass through for now
+    // Canvas fingerprinting is less critical than other detection methods
     try {
       if (typeof HTMLCanvasElement !== 'undefined' && HTMLCanvasElement.prototype) {
-        const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function(type) {
-          // Add slight noise to prevent fingerprinting (but keep it consistent)
-          try {
-            const context = this.getContext('2d');
-            if (context) {
-              const imageData = context.getImageData(0, 0, this.width, this.height);
-              // Add minimal noise (undetectable to human eye but changes fingerprint)
-              for (let i = 0; i < imageData.data.length; i += 4) {
-                if (Math.random() < 0.001) { // Very rare noise
-                  imageData.data[i] = Math.min(255, imageData.data[i] + 1);
-                }
-              }
-              context.putImageData(imageData, 0, 0);
-            }
-          } catch (e) {
-            // Ignore canvas manipulation errors
-          }
-          return originalToDataURL.apply(this, arguments);
-        };
+        // Keep original behavior - canvas fingerprinting is less critical
+        // and modifying it can cause errors
       }
     } catch (e) {
       // Silently fail if Canvas override doesn't work
@@ -915,25 +904,6 @@ async function bookClass({
       });
     } catch (e) {
       // Silently fail
-    }
-    
-    // Override permissions to prevent VM detection via permission queries
-    try {
-      if (navigator && navigator.permissions && navigator.permissions.query) {
-        const originalPermissionsQuery = navigator.permissions.query;
-        navigator.permissions.query = function(parameters) {
-          // Return realistic permission states for Mac
-          if (parameters.name === 'notifications') {
-            return Promise.resolve({ state: 'default' });
-          }
-          if (parameters.name === 'geolocation') {
-            return Promise.resolve({ state: 'prompt' });
-          }
-          return originalPermissionsQuery.call(this, parameters);
-        };
-      }
-    } catch (e) {
-      // Silently fail if permissions override doesn't work
     }
     } catch (globalError) {
       // Catch any unhandled errors in evaluateOnNewDocument to prevent page crash
