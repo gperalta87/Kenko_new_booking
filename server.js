@@ -1050,18 +1050,8 @@ async function bookClass({
       });
       dlog("Page loaded");
       
-      // Verify stealth is working - check if webdriver is hidden
-      const webdriverCheck = await page.evaluate(() => {
-        return {
-          webdriver: navigator.webdriver,
-          userAgent: navigator.userAgent,
-          plugins: navigator.plugins.length,
-          languages: navigator.languages,
-          chrome: !!window.chrome
-        };
-      });
-      dlog(`Stealth check: webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
-      logToFile(`[STEALTH] webdriver=${webdriverCheck.webdriver}, chrome=${webdriverCheck.chrome}, plugins=${webdriverCheck.plugins}`);
+      // REMOVED: Stealth check - page.evaluate() might trigger detection
+      // The stealth plugin is already active, so we don't need to verify
       
       await sleep(1000); // Wait for page to fully render and scripts to load
     });
