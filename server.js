@@ -2256,75 +2256,121 @@ async function bookClass({
             
             // First, try to find and click the exit/close button (X) in the top left of the modal
             const exitButtonInfo = await page.evaluate(() => {
-              // Look for common close/exit button patterns in the top left of modals
-              const selectors = [
-                'button[aria-label*="close" i]',
-                'button[aria-label*="Close" i]',
-                'button[aria-label*="exit" i]',
-                'button[aria-label*="Exit" i]',
-                '[role="button"][aria-label*="close" i]',
-                '[role="button"][aria-label*="Close" i]',
-                'button.close',
-                'button.close-button',
-                '.close-button',
-                '.modal-close',
-                '[class*="close"][class*="button"]',
-                'button:has(svg[class*="close"])',
-                'button:has(svg[class*="x"])',
-                'button:has(> svg)',
-                // Look for buttons with X icon (common pattern: button with SVG containing path or circle)
-                'button > svg',
-                'button > span > svg'
-              ];
+              const viewportHeight = window.innerHeight;
+              const viewportWidth = window.innerWidth;
               
-              for (const selector of selectors) {
-                const elements = Array.from(document.querySelectorAll(selector));
-                for (const el of elements) {
-                  if (el.offsetParent === null) continue; // Skip hidden elements
-                  
-                  // Check if it's in the top left area (roughly top 20% and left 20% of viewport)
-                  const rect = el.getBoundingClientRect();
-                  const viewportHeight = window.innerHeight;
-                  const viewportWidth = window.innerWidth;
-                  
-                  if (rect.top < viewportHeight * 0.2 && rect.left < viewportWidth * 0.2) {
-                    // Check if it looks like a close button (has X, close icon, or is small)
-                    const text = (el.textContent || '').trim().toLowerCase();
-                    const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
-                    const hasX = text === 'x' || ariaLabel.includes('close') || ariaLabel.includes('exit');
-                    const isSmall = rect.width < 50 && rect.height < 50; // Small buttons are often close buttons
+              // Strategy 1: Look for buttons with SVG icons (X icon in circle)
+              const allButtons = Array.from(document.querySelectorAll('button, [role="button"], div[onclick], div[cursor="pointer"]'));
+              for (const btn of allButtons) {
+                if (btn.offsetParent === null) continue; // Skip hidden elements
+                
+                const rect = btn.getBoundingClientRect();
+                
+                // Check if it's in the top left area (top 25% and left 25% of viewport)
+                if (rect.top < viewportHeight * 0.25 && rect.left < viewportWidth * 0.25) {
+                  // Check if it's a small button (close buttons are usually small)
+                  if (rect.width < 80 && rect.height < 80) {
+                    // Check if it contains an SVG (X icon)
+                    const hasSvg = btn.querySelector('svg') !== null;
                     
-                    if (hasX || isSmall) {
+                    // Check if it has a circle background (dark grey circle)
+                    const styles = window.getComputedStyle(btn);
+                    const bgColor = styles.backgroundColor;
+                    const borderRadius = styles.borderRadius;
+                    const hasCircleBg = borderRadius.includes('50%') || borderRadius.includes('9999px') || 
+                                       bgColor.includes('rgb') || bgColor.includes('rgba');
+                    
+                    // Check text/aria-label
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    const hasCloseText = text === 'x' || text === '×' || ariaLabel.includes('close') || 
+                                       ariaLabel.includes('exit') || ariaLabel.includes('dismiss');
+                    
+                    // If it has SVG or close text, or looks like a circular button, it's likely the close button
+                    if (hasSvg || hasCloseText || (hasCircleBg && rect.width < 50 && rect.height < 50)) {
                       return { 
                         found: true, 
-                        selector: selector, 
+                        selector: 'top-left-svg-button', 
                         x: rect.x + rect.width / 2, 
                         y: rect.y + rect.height / 2,
                         text: text,
-                        ariaLabel: ariaLabel
+                        ariaLabel: ariaLabel,
+                        width: rect.width,
+                        height: rect.height
                       };
                     }
                   }
                 }
               }
               
-              // Fallback: Look for any button in top-left corner
-              const allButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
-              for (const btn of allButtons) {
-                if (btn.offsetParent === null) continue;
-                const rect = btn.getBoundingClientRect();
-                const viewportHeight = window.innerHeight;
-                const viewportWidth = window.innerWidth;
+              // Strategy 2: Look for SVG elements directly in top-left
+              const allSvgs = Array.from(document.querySelectorAll('svg'));
+              for (const svg of allSvgs) {
+                if (svg.offsetParent === null) continue;
                 
-                if (rect.top < viewportHeight * 0.15 && rect.left < viewportWidth * 0.15 && rect.width < 60 && rect.height < 60) {
-                  return { 
-                    found: true, 
-                    selector: 'top-left-button', 
-                    x: rect.x + rect.width / 2, 
-                    y: rect.y + rect.height / 2,
-                    text: (btn.textContent || '').trim(),
-                    ariaLabel: (btn.getAttribute('aria-label') || '')
-                  };
+                const rect = svg.getBoundingClientRect();
+                if (rect.top < viewportHeight * 0.25 && rect.left < viewportWidth * 0.25) {
+                  // Find the closest clickable parent (button or div with onclick)
+                  let parent = svg.parentElement;
+                  let clickableParent = null;
+                  let depth = 0;
+                  
+                  while (parent && depth < 5) {
+                    if (parent.tagName === 'BUTTON' || 
+                        parent.getAttribute('role') === 'button' ||
+                        parent.onclick ||
+                        parent.style.cursor === 'pointer' ||
+                        window.getComputedStyle(parent).cursor === 'pointer') {
+                      clickableParent = parent;
+                      break;
+                    }
+                    parent = parent.parentElement;
+                    depth++;
+                  }
+                  
+                  if (clickableParent) {
+                    const parentRect = clickableParent.getBoundingClientRect();
+                    if (parentRect.width < 80 && parentRect.height < 80) {
+                      return { 
+                        found: true, 
+                        selector: 'svg-parent-button', 
+                        x: parentRect.x + parentRect.width / 2, 
+                        y: parentRect.y + parentRect.height / 2,
+                        text: (clickableParent.textContent || '').trim(),
+                        ariaLabel: (clickableParent.getAttribute('aria-label') || ''),
+                        width: parentRect.width,
+                        height: parentRect.height
+                      };
+                    }
+                  }
+                }
+              }
+              
+              // Strategy 3: Look for any small clickable element in top-left (most aggressive)
+              const allClickable = Array.from(document.querySelectorAll('button, [role="button"], div[onclick], [class*="close"], [class*="Close"]'));
+              for (const el of allClickable) {
+                if (el.offsetParent === null) continue;
+                
+                const rect = el.getBoundingClientRect();
+                if (rect.top < viewportHeight * 0.2 && rect.left < viewportWidth * 0.2 && 
+                    rect.width < 60 && rect.height < 60) {
+                  // Prefer elements with SVG or close-related classes
+                  const hasSvg = el.querySelector('svg') !== null;
+                  const className = (el.className || '').toLowerCase();
+                  const hasCloseClass = className.includes('close') || className.includes('exit') || className.includes('x');
+                  
+                  if (hasSvg || hasCloseClass) {
+                    return { 
+                      found: true, 
+                      selector: 'top-left-small-button', 
+                      x: rect.x + rect.width / 2, 
+                      y: rect.y + rect.height / 2,
+                      text: (el.textContent || '').trim(),
+                      ariaLabel: (el.getAttribute('aria-label') || ''),
+                      width: rect.width,
+                      height: rect.height
+                    };
+                  }
                 }
               }
               
