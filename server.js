@@ -1170,30 +1170,12 @@ async function bookClass({
 
     // Step 2: Enter gym location (it's a text input, not a dropdown)
     await step("Enter gym location", async () => {
-      // Wait a bit before checking page validity - let page stabilize
-      await sleep(1000);
+      // Wait for page to stabilize after navigation
+      await sleep(2000);
       
-      // CRITICAL: Verify page is still valid before proceeding
-      // Frames may detach after navigation, so we need to check
-      // But don't throw error immediately - try to wait for page to stabilize
-      let pageValid = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const currentUrl = page.url();
-          dlog(`Page is valid (attempt ${attempt + 1}), current URL: ${currentUrl}`);
-          pageValid = true;
-          break;
-        } catch (e) {
-          dlog(`Page check failed (attempt ${attempt + 1}): ${e?.message}`);
-          if (attempt < 2) {
-            await sleep(1000); // Wait and retry
-          }
-        }
-      }
-      
-      if (!pageValid) {
-        throw new Error(`Page frame detached before gym selection - page closed or not accessible`);
-      }
+      // Don't check page.url() - it might trigger detection
+      // Instead, directly try to find and interact with the input field
+      // This is more resilient to frame detachment
       
       // Wait for the input field to be visible - use the same selector as reference
       // Reference code uses: input[placeholder*="Search for your business"]
@@ -1260,6 +1242,20 @@ async function bookClass({
       }
       
       if (!inputElement) {
+        // Check if page is closed before throwing error
+        let pageClosed = false;
+        try {
+          await page.evaluate(() => document.readyState).catch(() => {
+            pageClosed = true;
+          });
+        } catch (e) {
+          pageClosed = true;
+        }
+        
+        if (pageClosed) {
+          throw new Error(`Page closed or frame detached - cannot find gym input field. This may indicate automation detection.`);
+        }
+        
         if (DEBUG) {
           try {
             await page.screenshot({ path: '/tmp/gym-input-debug.png', fullPage: true });
