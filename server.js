@@ -2762,6 +2762,147 @@ async function bookClass({
           // Additional wait for page to recover from any JavaScript errors
           await sleep(2000);
           
+          // Check if we're in the wrong modal (the "Booked 0/" view modal instead of booking dialog)
+          // This happens when automation is detected - the website shows a view-only modal
+          const modalCheck = await page.evaluate(() => {
+            const bodyText = (document.body.textContent || '').toLowerCase();
+            const hasBookedModal = bodyText.includes('booked') && (bodyText.includes('waitlisted') || bodyText.includes('cancelled'));
+            const hasBookCustomerButton = bodyText.includes('book customer');
+            
+            // Look for buttons that might open the booking dialog - search more broadly
+            const allButtons = Array.from(document.querySelectorAll('button, [role="button"], div[onclick], a[onclick], [class*="add"], [class*="book"], [class*="plus"], [class*="new"]'));
+            const potentialBookingButtons = [];
+            
+            // Also look for SVG icons that might be clickable (like a "+" icon)
+            const allSvgs = Array.from(document.querySelectorAll('svg'));
+            const svgParents = [];
+            for (const svg of allSvgs) {
+              if (svg.offsetParent === null) continue;
+              // Check if SVG is a plus icon (common pattern: path with "M" commands)
+              const paths = svg.querySelectorAll('path');
+              for (const path of paths) {
+                const d = path.getAttribute('d') || '';
+                // Plus icon typically has horizontal and vertical lines
+                if (d.includes('M') && (d.includes('H') || d.includes('V') || d.includes('h') || d.includes('v'))) {
+                  let parent = svg.parentElement;
+                  let depth = 0;
+                  while (parent && depth < 5) {
+                    if (parent.tagName === 'BUTTON' || parent.getAttribute('role') === 'button' || 
+                        parent.onclick || parent.style.cursor === 'pointer' ||
+                        window.getComputedStyle(parent).cursor === 'pointer') {
+                      svgParents.push(parent);
+                      break;
+                    }
+                    parent = parent.parentElement;
+                    depth++;
+                  }
+                  break;
+                }
+              }
+            }
+            
+            // Combine buttons and SVG parents
+            const allClickable = [...allButtons, ...svgParents];
+            
+            for (const btn of allClickable) {
+              if (btn.offsetParent === null) continue;
+              const text = (btn.textContent || '').trim().toLowerCase();
+              const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+              const className = (btn.className || '').toLowerCase();
+              const id = (btn.id || '').toLowerCase();
+              
+              // Look for buttons that might trigger booking - expanded criteria
+              const isBookingButton = 
+                text === '+' || text === 'add' || text === 'new' ||
+                text.includes('add customer') || text.includes('book customer') || text.includes('new booking') ||
+                text.includes('add booking') || text.includes('book') ||
+                ariaLabel.includes('add') || ariaLabel.includes('book') || ariaLabel.includes('new') ||
+                ariaLabel.includes('customer') || ariaLabel.includes('booking') ||
+                className.includes('add') || className.includes('book') || className.includes('plus') ||
+                className.includes('new') || className.includes('create') ||
+                id.includes('add') || id.includes('book') || id.includes('new');
+              
+              if (isBookingButton) {
+                const rect = btn.getBoundingClientRect();
+                potentialBookingButtons.push({
+                  text: btn.textContent.trim() || (btn.querySelector('svg') ? '+' : ''),
+                  ariaLabel: ariaLabel,
+                  className: className,
+                  id: id,
+                  x: rect.x + rect.width / 2,
+                  y: rect.y + rect.height / 2,
+                  visible: true
+                });
+              }
+            }
+            
+            return {
+              isBookedModal: hasBookedModal && !hasBookCustomerButton,
+              potentialBookingButtons: potentialBookingButtons,
+              hasBookCustomerButton: hasBookCustomerButton,
+              modalText: bodyText.substring(0, 200) // First 200 chars for debugging
+            };
+          }).catch(() => ({ isBookedModal: false, potentialBookingButtons: [], hasBookCustomerButton: false, modalText: '' }));
+          
+          // If we're in the "Booked 0/" modal, try to click a button to open the booking dialog
+          if (modalCheck.isBookedModal) {
+            logToFile(`⚠ Detected "Booked 0/" modal (automation detection) - this is NOT the booking dialog`);
+            dlog(`⚠ Detected "Booked 0/" modal - found ${modalCheck.potentialBookingButtons.length} potential booking buttons`);
+            
+            // Take screenshot to see what's available
+            await takeScreenshot(`detected-booked-modal-attempt-${attempt}`);
+            
+            if (modalCheck.potentialBookingButtons.length > 0) {
+              // Log all potential buttons found
+              for (const btn of modalCheck.potentialBookingButtons) {
+                logToFile(`  Found potential booking button: "${btn.text}" (aria-label: "${btn.ariaLabel}", class: "${btn.className}")`);
+                dlog(`  Found potential booking button: "${btn.text}" at (${btn.x}, ${btn.y})`);
+              }
+              
+              // Try clicking buttons in order of preference (prefer "Book Customer" or "Add Customer" text)
+              let clicked = false;
+              for (const bookingButton of modalCheck.potentialBookingButtons) {
+                const btnText = bookingButton.text.toLowerCase();
+                if (btnText.includes('book customer') || btnText.includes('add customer') || btnText === '+' || btnText === 'add') {
+                  logToFile(`  Attempting to click button: "${bookingButton.text}" (aria-label: "${bookingButton.ariaLabel}")`);
+                  dlog(`  Attempting to click button: "${bookingButton.text}" at (${bookingButton.x}, ${bookingButton.y})`);
+                  
+                  try {
+                    await page.mouse.click(bookingButton.x, bookingButton.y);
+                    logClick('Open booking dialog from "Booked 0/" modal', `mouse.click(${bookingButton.x}, ${bookingButton.y})`, 'Puppeteer.mouse.click(coordinates)');
+                    logToFile(`✓ Clicked potential booking button: "${bookingButton.text}"`);
+                    await sleep(2000); // Wait for booking dialog to open
+                    clicked = true;
+                    break;
+                  } catch (e) {
+                    logToFile(`⚠ Failed to click booking button "${bookingButton.text}": ${e?.message}`);
+                    dlog(`⚠ Failed to click booking button "${bookingButton.text}": ${e?.message}`);
+                  }
+                }
+              }
+              
+              // If no preferred button was clicked, try the first one
+              if (!clicked && modalCheck.potentialBookingButtons.length > 0) {
+                const bookingButton = modalCheck.potentialBookingButtons[0];
+                logToFile(`  Attempting to click first available button: "${bookingButton.text}"`);
+                dlog(`  Attempting to click first available button: "${bookingButton.text}" at (${bookingButton.x}, ${bookingButton.y})`);
+                
+                try {
+                  await page.mouse.click(bookingButton.x, bookingButton.y);
+                  logClick('Open booking dialog from "Booked 0/" modal (fallback)', `mouse.click(${bookingButton.x}, ${bookingButton.y})`, 'Puppeteer.mouse.click(coordinates)');
+                  logToFile(`✓ Clicked potential booking button (fallback)`);
+                  await sleep(2000); // Wait for booking dialog to open
+                } catch (e) {
+                  logToFile(`⚠ Failed to click booking button (fallback): ${e?.message}`);
+                  dlog(`⚠ Failed to click booking button (fallback): ${e?.message}`);
+                }
+              }
+            } else {
+              logToFile(`⚠ No booking buttons found in "Booked 0/" modal - may need manual inspection`);
+              dlog(`⚠ No booking buttons found in "Booked 0/" modal - automation may be fully blocked`);
+            }
+          }
+          
           // Try multiple times with progressive waits to find the "Book Customer" button
           let bookCustomerFound = false;
           for (let checkAttempt = 0; checkAttempt < 8; checkAttempt++) { // Increased from 5 to 8 attempts
