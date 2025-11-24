@@ -2254,7 +2254,116 @@ async function bookClass({
             logToFile(`[RETRY] Attempt ${attempt} to click class and open booking dialog`);
             dlog(`[RETRY] Attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES} - Going back to calendar and retrying...`);
             
-            // Close any modals/dialogs by pressing Escape multiple times
+            // First, try to find and click the exit/close button (X) in the top left of the modal
+            const exitButtonInfo = await page.evaluate(() => {
+              // Look for common close/exit button patterns in the top left of modals
+              const selectors = [
+                'button[aria-label*="close" i]',
+                'button[aria-label*="Close" i]',
+                'button[aria-label*="exit" i]',
+                'button[aria-label*="Exit" i]',
+                '[role="button"][aria-label*="close" i]',
+                '[role="button"][aria-label*="Close" i]',
+                'button.close',
+                'button.close-button',
+                '.close-button',
+                '.modal-close',
+                '[class*="close"][class*="button"]',
+                'button:has(svg[class*="close"])',
+                'button:has(svg[class*="x"])',
+                'button:has(> svg)',
+                // Look for buttons with X icon (common pattern: button with SVG containing path or circle)
+                'button > svg',
+                'button > span > svg'
+              ];
+              
+              for (const selector of selectors) {
+                const elements = Array.from(document.querySelectorAll(selector));
+                for (const el of elements) {
+                  if (el.offsetParent === null) continue; // Skip hidden elements
+                  
+                  // Check if it's in the top left area (roughly top 20% and left 20% of viewport)
+                  const rect = el.getBoundingClientRect();
+                  const viewportHeight = window.innerHeight;
+                  const viewportWidth = window.innerWidth;
+                  
+                  if (rect.top < viewportHeight * 0.2 && rect.left < viewportWidth * 0.2) {
+                    // Check if it looks like a close button (has X, close icon, or is small)
+                    const text = (el.textContent || '').trim().toLowerCase();
+                    const ariaLabel = (el.getAttribute('aria-label') || '').toLowerCase();
+                    const hasX = text === 'x' || ariaLabel.includes('close') || ariaLabel.includes('exit');
+                    const isSmall = rect.width < 50 && rect.height < 50; // Small buttons are often close buttons
+                    
+                    if (hasX || isSmall) {
+                      return { 
+                        found: true, 
+                        selector: selector, 
+                        x: rect.x + rect.width / 2, 
+                        y: rect.y + rect.height / 2,
+                        text: text,
+                        ariaLabel: ariaLabel
+                      };
+                    }
+                  }
+                }
+              }
+              
+              // Fallback: Look for any button in top-left corner
+              const allButtons = Array.from(document.querySelectorAll('button, [role="button"]'));
+              for (const btn of allButtons) {
+                if (btn.offsetParent === null) continue;
+                const rect = btn.getBoundingClientRect();
+                const viewportHeight = window.innerHeight;
+                const viewportWidth = window.innerWidth;
+                
+                if (rect.top < viewportHeight * 0.15 && rect.left < viewportWidth * 0.15 && rect.width < 60 && rect.height < 60) {
+                  return { 
+                    found: true, 
+                    selector: 'top-left-button', 
+                    x: rect.x + rect.width / 2, 
+                    y: rect.y + rect.height / 2,
+                    text: (btn.textContent || '').trim(),
+                    ariaLabel: (btn.getAttribute('aria-label') || '')
+                  };
+                }
+              }
+              
+              return { found: false };
+            }).catch(() => ({ found: false }));
+            
+            if (exitButtonInfo.found) {
+              logToFile(`✓ Found exit/close button at (${exitButtonInfo.x}, ${exitButtonInfo.y}) - selector: ${exitButtonInfo.selector}`);
+              dlog(`✓ Found exit/close button: text="${exitButtonInfo.text}", aria-label="${exitButtonInfo.ariaLabel}"`);
+              
+              // Click using Puppeteer mouse click for better reliability
+              try {
+                await page.mouse.click(exitButtonInfo.x, exitButtonInfo.y);
+                logClick('Exit/Close button (modal)', `mouse.click(${exitButtonInfo.x}, ${exitButtonInfo.y})`, 'Puppeteer.mouse.click(coordinates)');
+                logToFile(`✓ Clicked exit/close button using coordinates`);
+                dlog(`✓ Clicked exit/close button using coordinates`);
+                await sleep(500);
+              } catch (e) {
+                logToFile(`⚠ Failed to click exit button by coordinates: ${e?.message}, trying selectors...`);
+                // Try using clickElement as fallback
+                try {
+                  await clickElement(page, [
+                    exitButtonInfo.selector,
+                    'button[aria-label*="close" i]',
+                    'button[aria-label*="Close" i]',
+                    '.close-button',
+                    '.modal-close'
+                  ], { location: 'Exit/Close button', debug: DEBUG });
+                  await sleep(500);
+                } catch (e2) {
+                  logToFile(`⚠ Failed to click exit button using selectors: ${e2?.message}`);
+                }
+              }
+            } else {
+              logToFile(`⚠ Exit button not found, using Escape key fallback`);
+              dlog(`⚠ Exit button not found, using Escape key fallback`);
+            }
+            
+            // Close any modals/dialogs by pressing Escape multiple times (fallback)
             await page.keyboard.press('Escape');
             await sleep(500);
             await page.keyboard.press('Escape');
