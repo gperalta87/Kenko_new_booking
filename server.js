@@ -1071,14 +1071,6 @@ async function bookClass({
       await page.setViewport({ width: 1920, height: 1080 }); // Use realistic viewport
       dlog("Navigating to login page");
       
-      // Track if frame detaches during navigation
-      let frameDetached = false;
-      const frameDetachHandler = () => {
-        frameDetached = true;
-        dlog("⚠ Frame detached during navigation");
-      };
-      page.once("framedetached", frameDetachHandler);
-      
       try {
         // Use networkidle2 to wait for network activity to settle (more reliable than domcontentloaded)
         // networkidle2 = wait until there are no more than 2 network connections for at least 500ms
@@ -1089,30 +1081,35 @@ async function bookClass({
         dlog("Page loaded (networkidle2)");
       } catch (navError) {
         dlog(`Navigation error: ${navError?.message}`);
-        // Check if page is still valid
+        // Check if page is still valid - frame detachment during navigation is normal
         try {
           const url = page.url();
           dlog(`Page URL after navigation error: ${url}`);
+          // If we can get the URL, the page is still valid, continue
         } catch (e) {
           throw new Error(`Page became invalid during navigation: ${e?.message}`);
         }
         // Continue anyway if we got some page loaded
-      } finally {
-        page.off("framedetached", frameDetachHandler);
       }
       
       // Wait for page to stabilize after navigation
       await sleep(2000);
       
-      // Verify page is still valid and hasn't detached
+      // Verify page is still valid (frame detachment during navigation is normal, but page should still be valid)
+      let pageUrl;
       try {
-        const pageUrl = page.url();
+        pageUrl = page.url();
         dlog(`Page URL after navigation: ${pageUrl}`);
-        if (frameDetached) {
-          throw new Error("Frame detached during navigation");
-        }
       } catch (e) {
         throw new Error(`Page became invalid after navigation: ${e?.message}`);
+      }
+      
+      // Additional check: try to evaluate something to ensure the page is interactive
+      try {
+        await page.evaluate(() => document.readyState);
+        dlog("Page is interactive");
+      } catch (e) {
+        throw new Error(`Page is not interactive after navigation: ${e?.message}`);
       }
       
       // Verify stealth is working - check if webdriver is hidden
