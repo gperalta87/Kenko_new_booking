@@ -763,8 +763,9 @@ async function bookClass({
   
   // Simulate human reading/thinking time before clicking
   const humanThinkingDelay = async () => {
-    // Humans typically take 1-3 seconds to read and decide before clicking
-    const delay = Math.floor(Math.random() * 2000) + 1000;
+    // Humans typically take 2-5 seconds to read and decide before clicking
+    // Longer delays help avoid automation detection
+    const delay = Math.floor(Math.random() * 3000) + 2000;
     await sleep(delay);
   };
   
@@ -2437,7 +2438,27 @@ async function bookClass({
       // Step 4: Wait for calendar events to load after selecting date
       dlog(`Step 4: Waiting for events to load after date selection...`);
       await takeScreenshot('after-date-selection');
-      await sleep(2000);
+      
+      // Add human-like page interaction before looking for class
+      // Humans don't immediately click - they look around, scroll, etc.
+      dlog(`  Simulating human page interaction (scrolling, mouse movements)...`);
+      await simulateHumanBehavior();
+      await humanDelay(1000, 2000);
+      
+      // Random subtle scrolling to simulate reading the calendar
+      const scrollAmount = Math.floor(Math.random() * 300) + 100;
+      await page.evaluate((amount) => {
+        window.scrollBy(0, amount);
+      }, scrollAmount);
+      await humanDelay(500, 1000);
+      
+      // Scroll back a bit (humans scroll up and down)
+      await page.evaluate((amount) => {
+        window.scrollBy(0, -amount / 2);
+      }, scrollAmount);
+      await humanDelay(500, 1000);
+      
+      await sleep(1000);
       
       try {
         await page.waitForSelector('mwl-calendar-week-view-event, div.checker-details, [class*="calendar-event"], [class*="event"]', { timeout: 15000, visible: true }).catch(() => {
@@ -2448,6 +2469,19 @@ async function bookClass({
       }
       await sleep(2000);
       await takeScreenshot('before-looking-for-class');
+      
+      // Additional human-like behavior: simulate reading the calendar before clicking
+      // This helps avoid automation detection - humans don't immediately click
+      dlog(`  Simulating human reading calendar before clicking class...`);
+      await simulateHumanBehavior();
+      await humanDelay(1500, 2500); // Longer delay - humans take time to find the right class
+      
+      // Random subtle scrolling to simulate reading
+      const scrollAmount = Math.floor(Math.random() * 200) + 50;
+      await page.evaluate((amount) => {
+        window.scrollBy(0, amount);
+      }, scrollAmount);
+      await humanDelay(400, 800);
       
       // Step 5: Find and click the class at target time
       dlog(`Step 5: Looking for class at ${targetHour}:${targetMinute.toString().padStart(2, '0')}...`);
@@ -2774,12 +2808,86 @@ async function bookClass({
           // Now click it using Puppeteer's native click methods
           dlog(`Attempting to click the class element using Puppeteer... (attempt ${attempt})`);
           
-          // CRITICAL: Add human-like behavior before clicking to prevent automation detection
-          // Simulate human reading/thinking time
-          await humanThinkingDelay();
+          // CRITICAL: Add extensive human-like behavior before clicking to prevent automation detection
+          // The website detects automation, so we need to be very realistic
           
-          // Simulate mouse movement to the element (humans move mouse before clicking)
+          // 1. Simulate human reading/thinking time (longer delay)
+          dlog(`  Simulating human reading time before clicking class...`);
+          await humanThinkingDelay();
+          await humanDelay(1000, 2000); // Additional random delay
+          
+          // 2. Simulate mouse movement and page interaction
           await simulateHumanBehavior();
+          
+          // 2b. Add more realistic page interaction - humans don't go straight to the target
+          // Simulate looking around the calendar first
+          dlog(`  Simulating human browsing behavior (looking around calendar)...`);
+          try {
+            // Random mouse movements across the calendar area
+            const viewport = page.viewport();
+            if (viewport) {
+              // Move mouse to different areas of the calendar (not just the target)
+              for (let i = 0; i < 3; i++) {
+                const randomX = viewport.width * (0.3 + Math.random() * 0.4); // Center area
+                const randomY = viewport.height * (0.2 + Math.random() * 0.6); // Middle to bottom
+                await page.mouse.move(randomX, randomY, { steps: Math.floor(Math.random() * 10) + 5 });
+                await sleep(Math.random() * 300 + 200);
+              }
+            }
+            
+            // Random small scrolls (humans scroll to see more)
+            const smallScroll = Math.floor(Math.random() * 100) + 50;
+            await page.evaluate((amount) => {
+              window.scrollBy(0, amount);
+            }, smallScroll);
+            await humanDelay(300, 600);
+            
+            // Scroll back a bit
+            await page.evaluate((amount) => {
+              window.scrollBy(0, -amount / 2);
+            }, smallScroll);
+            await humanDelay(300, 600);
+          } catch (e) {
+            dlog(`  Page interaction simulation failed: ${e?.message}`);
+          }
+          
+          // 3. Hover over the class element first (humans hover before clicking)
+          if (classInfo.selector) {
+            try {
+              const classElement = await page.$(classInfo.selector);
+              if (classElement) {
+                const isVisible = await classElement.isVisible().catch(() => false);
+                if (isVisible) {
+                  dlog(`  Hovering over class element to simulate human behavior...`);
+                  const box = await classElement.boundingBox();
+                  if (box) {
+                    // Move mouse to the element (but don't click yet)
+                    const hoverX = box.x + box.width / 2;
+                    const hoverY = box.y + box.height / 2;
+                    await page.mouse.move(hoverX, hoverY, { steps: Math.floor(Math.random() * 10) + 5 });
+                    await humanDelay(500, 1000); // Hover for a bit
+                    
+                    // Small random mouse movements while hovering (like humans do)
+                    for (let i = 0; i < 2; i++) {
+                      const smallMoveX = hoverX + (Math.random() * 20 - 10);
+                      const smallMoveY = hoverY + (Math.random() * 20 - 10);
+                      await page.mouse.move(smallMoveX, smallMoveY, { steps: 3 });
+                      await sleep(Math.random() * 200 + 100);
+                    }
+                    
+                    // Move back to center
+                    await page.mouse.move(hoverX, hoverY, { steps: 3 });
+                    await humanDelay(300, 600);
+                  }
+                }
+              }
+            } catch (e) {
+              dlog(`  Hover simulation failed: ${e?.message}`);
+            }
+          }
+          
+          // 4. Additional random delay to simulate decision-making
+          await humanDelay(500, 1500);
           
           let clicked = false;
           
@@ -2807,13 +2915,50 @@ async function bookClass({
                     const classLocator = page.locator(classInfo.selector);
                     const titleLocator = classLocator.locator('div.title').first();
                     
-                    // Wait for the title element to be available
-                    await titleLocator.waitFor({ timeout: 2000 });
+                    // Wait for the title element to be available and fully interactive
+                    await titleLocator.waitFor({ timeout: 3000, state: 'visible' });
+                    
+                    // Additional wait to ensure element is fully loaded and interactive
+                    await humanDelay(300, 600);
+                    
+                    // Get bounding box to hover first (humans hover before clicking)
+                    try {
+                      const titleBox = await titleLocator.boundingBox();
+                      if (titleBox) {
+                        const hoverX = titleBox.x + 170;
+                        const hoverY = titleBox.y + 15;
+                        
+                        // Move mouse to the click position first (hover)
+                        dlog(`  Moving mouse to element and hovering (human-like behavior)...`);
+                        await page.mouse.move(hoverX, hoverY, { steps: Math.floor(Math.random() * 10) + 8 });
+                        await humanDelay(400, 800); // Hover for realistic time
+                        
+                        // Small micro-movements while hovering (humans don't hold perfectly still)
+                        for (let i = 0; i < Math.floor(Math.random() * 2) + 1; i++) {
+                          const microX = hoverX + (Math.random() * 10 - 5);
+                          const microY = hoverY + (Math.random() * 10 - 5);
+                          await page.mouse.move(microX, microY, { steps: 2 });
+                          await sleep(Math.random() * 150 + 50);
+                        }
+                        
+                        // Move back to exact position
+                        await page.mouse.move(hoverX, hoverY, { steps: 2 });
+                        await humanDelay(200, 400);
+                      }
+                    } catch (hoverError) {
+                      dlog(`  Hover failed, continuing with click: ${hoverError?.message}`);
+                    }
                     
                     // Use the Locator API's .click() method with offset (like real web session)
                     // This is what the user's code does: .click({ offset: { x: 170, y: 15 } })
+                    // Add a small random delay before clicking (humans don't click instantly after hovering)
+                    await humanDelay(200, 500);
+                    
                     dlog(`  Clicking div.title using Locator API with offset (170, 15) - like real web session`);
-                    await titleLocator.click({ offset: { x: 170, y: 15 } });
+                    await titleLocator.click({ 
+                      offset: { x: 170, y: 15 },
+                      delay: Math.floor(Math.random() * 50) + 20 // Random delay between mousedown and mouseup (20-70ms) - more human-like
+                    });
                     clicked = true;
                     dlog(`  ✓ Clicked using Locator API .click() with offset - matches recorded pattern`);
                   } catch (locatorError) {
