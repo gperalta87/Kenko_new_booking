@@ -2477,10 +2477,10 @@ async function bookClass({
       await humanDelay(1500, 2500); // Longer delay - humans take time to find the right class
       
       // Random subtle scrolling to simulate reading
-      const scrollAmount = Math.floor(Math.random() * 200) + 50;
+      const scrollAmount2 = Math.floor(Math.random() * 200) + 50;
       await page.evaluate((amount) => {
         window.scrollBy(0, amount);
-      }, scrollAmount);
+      }, scrollAmount2);
       await humanDelay(400, 800);
       
       // Step 5: Find and click the class at target time
