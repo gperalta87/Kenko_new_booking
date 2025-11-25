@@ -4816,6 +4816,206 @@ app.get("/screenshots/:filename", (req, res) => {
   }
 });
 
+// HTML viewer for screenshots - displays all screenshots in chronological order
+app.get("/view-screenshots", (req, res) => {
+  try {
+    const files = fs.readdirSync(LOG_DIR)
+      .filter(f => f.startsWith('screenshot-') && f.endsWith('.png'))
+      .map(f => {
+        // Extract timestamp from filename: screenshot-name-2025-11-25T13-56-01-947Z.png
+        const timestampMatch = f.match(/(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z)/);
+        const timestamp = timestampMatch ? timestampMatch[1].replace(/-/g, ':').replace('T', ' ').replace(/:\d{3}Z$/, '') : null;
+        // Extract step name: screenshot-before-date-navigation-2025-11-25T13-56-01-947Z.png
+        // Remove 'screenshot-' prefix and timestamp suffix
+        let stepName = f.replace('screenshot-', '').replace(/-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z\.png$/, '').replace('.png', '');
+        // Replace hyphens with spaces and capitalize words
+        stepName = stepName.split('-').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+        return {
+          filename: f,
+          stepName: stepName || 'Screenshot',
+          timestamp: timestamp,
+          sortKey: timestampMatch ? timestampMatch[1] : f // Use timestamp for sorting, fallback to filename
+        };
+      })
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey)); // Sort chronologically (oldest first)
+    
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screenshot Viewer - Booking Progress</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #1a1a1a;
+      color: #e0e0e0;
+      padding: 20px;
+    }
+    .header {
+      background: #2a2a2a;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    h1 {
+      color: #4a9eff;
+      margin-bottom: 10px;
+    }
+    .info {
+      color: #aaa;
+      font-size: 14px;
+    }
+    .screenshot-container {
+      background: #2a2a2a;
+      border-radius: 8px;
+      padding: 20px;
+      margin-bottom: 30px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+      break-inside: avoid;
+    }
+    .screenshot-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #444;
+    }
+    .screenshot-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #4a9eff;
+      text-transform: capitalize;
+    }
+    .screenshot-meta {
+      font-size: 12px;
+      color: #888;
+    }
+    .screenshot-image {
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+      border-radius: 4px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      cursor: pointer;
+      transition: transform 0.2s;
+    }
+    .screenshot-image:hover {
+      transform: scale(1.02);
+    }
+    .screenshot-image:active {
+      transform: scale(0.98);
+    }
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: #333;
+      z-index: 1000;
+    }
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #4a9eff, #00d4ff);
+      transition: width 0.3s;
+    }
+    .step-number {
+      display: inline-block;
+      background: #4a9eff;
+      color: white;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      text-align: center;
+      line-height: 28px;
+      font-size: 14px;
+      font-weight: bold;
+      margin-right: 10px;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #888;
+    }
+    .empty-state h2 {
+      color: #666;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="progress-bar">
+    <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+  </div>
+  
+  <div class="header">
+    <h1>📸 Screenshot Viewer</h1>
+    <div class="info">
+      Total screenshots: ${files.length} | 
+      <a href="/screenshots" style="color: #4a9eff; text-decoration: none;">JSON API</a> | 
+      <button onclick="location.reload()" style="background: #4a9eff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; margin-left: 10px;">🔄 Refresh</button>
+    </div>
+  </div>
+  
+  ${files.length === 0 ? `
+    <div class="empty-state">
+      <h2>No screenshots found</h2>
+      <p>Run a booking test to generate screenshots</p>
+    </div>
+  ` : files.map((file, index) => `
+    <div class="screenshot-container">
+      <div class="screenshot-header">
+        <div>
+          <span class="step-number">${index + 1}</span>
+          <span class="screenshot-title">${file.stepName}</span>
+        </div>
+        <div class="screenshot-meta">
+          ${file.timestamp || 'No timestamp'}
+        </div>
+      </div>
+      <img 
+        src="/screenshots/${file.filename}" 
+        alt="${file.stepName}"
+        class="screenshot-image"
+        onclick="window.open(this.src, '_blank')"
+        loading="lazy"
+        onload="updateProgress(${index + 1}, ${files.length})"
+      />
+    </div>
+  `).join('')}
+  
+  <script>
+    function updateProgress(loaded, total) {
+      const percentage = (loaded / total) * 100;
+      document.getElementById('progressFill').style.width = percentage + '%';
+    }
+    
+    // Scroll to top on load
+    window.scrollTo(0, 0);
+    
+    // Auto-refresh every 30 seconds if on Railway
+    if (window.location.hostname.includes('railway')) {
+      setTimeout(() => location.reload(), 30000);
+    }
+  </script>
+</body>
+</html>`;
+    
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (e) {
+    res.status(500).send(`<html><body><h1>Error</h1><p>${e.message}</p></body></html>`);
+  }
+});
+
 // Booking endpoint
 app.post("/book", async (req, res) => {
   console.log(`[REQ] POST /book body=`, JSON.stringify(req.body || {}));
