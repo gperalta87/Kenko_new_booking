@@ -2783,95 +2783,114 @@ async function bookClass({
           
           let clicked = false;
           
-          // Method 1: Use exact recorded click pattern from user's Puppeteer recording
-          // This matches the exact pattern: div:nth-of-type(3) div.title with offset { x: 170, y: 15 }
-          try {
-            dlog(`  Trying recorded click pattern: div:nth-of-type(3) div.title with offset (170, 15)...`);
-            
-            // Try the exact selectors from the recording, in order
-            const selectors = [
-              'div:nth-of-type(3) div.title',
-              '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div/div[2]/mwl-calendar-day-view/mwl-calendar-week-view/div/div/div/div/div[1]/div[3]/mwl-calendar-week-view-event/div/div[2]/div[1])',
-              ':scope >>> div:nth-of-type(3) div.title'
-            ];
-            
-            for (const selector of selectors) {
-              try {
-                // Try using Locator API first (Puppeteer v23+)
-                try {
-                  const locator = page.locator(selector).first();
-                  await locator.waitFor({ timeout: 2000 });
-                  const box = await locator.boundingBox();
-                  if (box) {
-                    const clickX = box.x + 170;
-                    const clickY = box.y + 15;
-                    dlog(`  Found element with selector: ${selector}, clicking at offset (170, 15) from bounding box`);
-                    await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                    await humanDelay(100, 300);
-                    await locator.click({ offset: { x: 170, y: 15 } });
-                    clicked = true;
-                    dlog(`  ✓ Clicked using Locator API with recorded pattern`);
-                    break;
-                  }
-                } catch (locatorError) {
-                  // Fallback to traditional selector method
-                  const element = await page.$(selector);
-                  if (element) {
-                    const isVisible = await element.isVisible().catch(() => false);
-                    if (isVisible) {
-                      const box = await element.boundingBox();
-                      if (box) {
-                        const clickX = box.x + 170;
-                        const clickY = box.y + 15;
-                        dlog(`  Found element with selector: ${selector}, clicking at offset (170, 15) from bounding box`);
-                        await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                        await humanDelay(100, 300);
-                        await page.mouse.click(clickX, clickY);
-                        clicked = true;
-                        dlog(`  ✓ Clicked using traditional selector with recorded pattern`);
-                        break;
+          // Method 1: Find the correct class element by time, then use recorded click pattern
+          // First, we need to find the class element that matches our target time
+          // Then within that element, find div.title and click with the recorded offset
+          if (classInfo.selector) {
+            try {
+              dlog(`  Finding class element by time using selector: ${classInfo.selector}`);
+              await page.waitForSelector(classInfo.selector, { visible: true, timeout: 3000 });
+              const classElement = await page.$(classInfo.selector);
+              
+              if (classElement) {
+                const isVisible = await classElement.isVisible().catch(() => false);
+                if (isVisible) {
+                  dlog(`  Found class element for ${targetTime}, now finding div.title within it...`);
+                  
+                  // Find the div.title within this class element (matching recorded pattern)
+                  // The recorded click was on div.title with offset { x: 170, y: 15 }
+                  const titleElement = await classElement.$('div.title');
+                  
+                  if (titleElement) {
+                    const titleBox = await titleElement.boundingBox();
+                    if (titleBox) {
+                      // Use the exact offset from the recorded click: { x: 170, y: 15 }
+                      // This offset is relative to the div.title element's bounding box
+                      const clickX = titleBox.x + 170;
+                      const clickY = titleBox.y + 15;
+                      
+                      dlog(`  Found div.title within class element, clicking at offset (170, 15) from title element`);
+                      dlog(`  Absolute click position: (${clickX.toFixed(1)}, ${clickY.toFixed(1)})`);
+                      
+                      // Scroll the element into view first
+                      await titleElement.scrollIntoView();
+                      await humanDelay(300, 600);
+                      
+                      // Move mouse to the click position (human behavior)
+                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
+                      await humanDelay(100, 300);
+                      
+                      // Click at the exact position
+                      await page.mouse.click(clickX, clickY);
+                      clicked = true;
+                      dlog(`  ✓ Clicked using recorded pattern: div.title with offset (170, 15)`);
+                    } else {
+                      dlog(`  ⚠ div.title found but no bounding box available`);
+                    }
+                  } else {
+                    dlog(`  ⚠ div.title not found within class element, trying alternative selectors...`);
+                    
+                    // Try alternative ways to find the title/clickable area
+                    // Sometimes it might be in a different structure
+                    const alternativeSelectors = [
+                      'div[class*="title"]',
+                      'div[class*="Title"]',
+                      '.title',
+                      'div:first-child',
+                      'div > div:first-child'
+                    ];
+                    
+                    for (const altSelector of alternativeSelectors) {
+                      try {
+                        const altElement = await classElement.$(altSelector);
+                        if (altElement) {
+                          const altBox = await altElement.boundingBox();
+                          if (altBox) {
+                            const clickX = altBox.x + 170;
+                            const clickY = altBox.y + 15;
+                            dlog(`  Found alternative element with selector: ${altSelector}, clicking...`);
+                            await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
+                            await humanDelay(100, 300);
+                            await page.mouse.click(clickX, clickY);
+                            clicked = true;
+                            dlog(`  ✓ Clicked using alternative selector: ${altSelector}`);
+                            break;
+                          }
+                        }
+                      } catch (e) {
+                        continue;
                       }
                     }
                   }
-                }
-              } catch (e) {
-                dlog(`  Selector "${selector}" failed: ${e?.message}`);
-                continue;
-              }
-            }
-            
-            // Also try finding div.title within the classInfo.selector element
-            if (!clicked && classInfo.selector) {
-              try {
-                const element = await page.$(classInfo.selector);
-                if (element) {
-                  const isVisible = await element.isVisible().catch(() => false);
-                  if (isVisible) {
-                    // Find the div.title within this element (matching recorded pattern)
-                    const titleElement = await element.$('div.title');
-                    if (titleElement) {
-                      const box = await titleElement.boundingBox();
-                      if (box) {
-                        // Use the exact offset from the recorded click: { x: 170, y: 15 }
-                        const clickX = box.x + 170;
-                        const clickY = box.y + 15;
-                        
-                        dlog(`  Clicking div.title within classInfo element with offset (170, 15)`);
-                        await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                        await humanDelay(100, 300);
-                        await page.mouse.click(clickX, clickY);
-                        clicked = true;
-                        dlog(`  ✓ Clicked using div.title within classInfo element`);
-                      }
+                  
+                  // If we still haven't clicked, fall back to clicking the class element itself
+                  if (!clicked) {
+                    dlog(`  Falling back to clicking class element directly...`);
+                    const classBox = await classElement.boundingBox();
+                    if (classBox) {
+                      // Click at a reasonable position on the class element
+                      const clickX = classBox.x + 170;
+                      const clickY = classBox.y + 15;
+                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
+                      await humanDelay(100, 300);
+                      await page.mouse.click(clickX, clickY);
+                      clicked = true;
+                      dlog(`  ✓ Clicked class element directly with offset (170, 15)`);
+                    } else {
+                      await classElement.click();
+                      clicked = true;
+                      dlog(`  ✓ Clicked class element directly (no bounding box)`);
                     }
                   }
+                } else {
+                  dlog(`  ⚠ Class element found but not visible`);
                 }
-              } catch (e) {
-                dlog(`  classInfo.selector + div.title click failed: ${e?.message}`);
+              } else {
+                dlog(`  ⚠ Class element not found with selector: ${classInfo.selector}`);
               }
+            } catch (e) {
+              dlog(`  Failed to click class element using classInfo.selector: ${e?.message}`);
             }
-          } catch (e) {
-            dlog(`  Recorded pattern click failed: ${e?.message}`);
           }
           
           // Method 1b: Fallback to original selector method if Locator API didn't work
