@@ -2783,103 +2783,77 @@ async function bookClass({
           
           let clicked = false;
           
-          // Method 1: Find the correct class element by time, then use recorded click pattern
-          // First, we need to find the class element that matches our target time
-          // Then within that element, find div.title and click with the recorded offset
+          // Method 1: Use Puppeteer Locator API with .click() and offset (matching user's recorded pattern)
+          // This is more like a real web session - uses element's click method with offset
+          // Key from user's code: locator.click({ offset: { x: 170, y: 15 } })
           if (classInfo.selector) {
             try {
               dlog(`  Finding class element by time using selector: ${classInfo.selector}`);
               await page.waitForSelector(classInfo.selector, { visible: true, timeout: 3000 });
+              
+              // Get the class element using Locator API
               const classElement = await page.$(classInfo.selector);
               
               if (classElement) {
                 const isVisible = await classElement.isVisible().catch(() => false);
                 if (isVisible) {
-                  dlog(`  Found class element for ${targetTime}, now finding div.title within it...`);
+                  dlog(`  Found class element for ${targetTime}, finding div.title within it...`);
                   
-                  // Find the div.title within this class element (matching recorded pattern)
-                  // The recorded click was on div.title with offset { x: 170, y: 15 }
-                  const titleElement = await classElement.$('div.title');
-                  
-                  if (titleElement) {
-                    const titleBox = await titleElement.boundingBox();
-                    if (titleBox) {
-                      // Use the exact offset from the recorded click: { x: 170, y: 15 }
-                      // This offset is relative to the div.title element's bounding box
-                      const clickX = titleBox.x + 170;
-                      const clickY = titleBox.y + 15;
-                      
-                      dlog(`  Found div.title within class element, clicking at offset (170, 15) from title element`);
-                      dlog(`  Absolute click position: (${clickX.toFixed(1)}, ${clickY.toFixed(1)})`);
-                      
-                      // Scroll the element into view first
-                      await titleElement.scrollIntoView();
-                      await humanDelay(300, 600);
-                      
-                      // Move mouse to the click position (human behavior)
-                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                      await humanDelay(100, 300);
-                      
-                      // Click at the exact position
-                      await page.mouse.click(clickX, clickY);
-                      clicked = true;
-                      dlog(`  ✓ Clicked using recorded pattern: div.title with offset (170, 15)`);
-                    } else {
-                      dlog(`  ⚠ div.title found but no bounding box available`);
-                    }
-                  } else {
-                    dlog(`  ⚠ div.title not found within class element, trying alternative selectors...`);
+                  // Use Locator API to find div.title within the class element
+                  // This matches the user's pattern: locator('div.title').click({ offset: { x: 170, y: 15 } })
+                  try {
+                    // Create a locator for div.title within the class element
+                    // We need to scope it to the class element
+                    const classLocator = page.locator(classInfo.selector);
+                    const titleLocator = classLocator.locator('div.title').first();
                     
-                    // Try alternative ways to find the title/clickable area
-                    // Sometimes it might be in a different structure
-                    const alternativeSelectors = [
-                      'div[class*="title"]',
-                      'div[class*="Title"]',
-                      '.title',
-                      'div:first-child',
-                      'div > div:first-child'
-                    ];
+                    // Wait for the title element to be available
+                    await titleLocator.waitFor({ timeout: 2000 });
                     
-                    for (const altSelector of alternativeSelectors) {
+                    // Use the Locator API's .click() method with offset (like real web session)
+                    // This is what the user's code does: .click({ offset: { x: 170, y: 15 } })
+                    dlog(`  Clicking div.title using Locator API with offset (170, 15) - like real web session`);
+                    await titleLocator.click({ offset: { x: 170, y: 15 } });
+                    clicked = true;
+                    dlog(`  ✓ Clicked using Locator API .click() with offset - matches recorded pattern`);
+                  } catch (locatorError) {
+                    dlog(`  Locator API failed: ${locatorError?.message}, trying fallback...`);
+                    
+                    // Fallback: Use traditional method but still try to find div.title
+                    const titleElement = await classElement.$('div.title');
+                    if (titleElement) {
+                      // Use element.click() with offset if supported, otherwise use mouse.click
                       try {
-                        const altElement = await classElement.$(altSelector);
-                        if (altElement) {
-                          const altBox = await altElement.boundingBox();
-                          if (altBox) {
-                            const clickX = altBox.x + 170;
-                            const clickY = altBox.y + 15;
-                            dlog(`  Found alternative element with selector: ${altSelector}, clicking...`);
-                            await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                            await humanDelay(100, 300);
-                            await page.mouse.click(clickX, clickY);
-                            clicked = true;
-                            dlog(`  ✓ Clicked using alternative selector: ${altSelector}`);
-                            break;
-                          }
-                        }
+                        // Try using the element's click method with offset (more like real session)
+                        await titleElement.click({ offset: { x: 170, y: 15 } });
+                        clicked = true;
+                        dlog(`  ✓ Clicked using element.click() with offset`);
                       } catch (e) {
-                        continue;
+                        // Fallback to mouse.click with calculated coordinates
+                        const titleBox = await titleElement.boundingBox();
+                        if (titleBox) {
+                          const clickX = titleBox.x + 170;
+                          const clickY = titleBox.y + 15;
+                          await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
+                          await humanDelay(100, 300);
+                          await page.mouse.click(clickX, clickY);
+                          clicked = true;
+                          dlog(`  ✓ Clicked using mouse.click() with calculated coordinates`);
+                        }
                       }
-                    }
-                  }
-                  
-                  // If we still haven't clicked, fall back to clicking the class element itself
-                  if (!clicked) {
-                    dlog(`  Falling back to clicking class element directly...`);
-                    const classBox = await classElement.boundingBox();
-                    if (classBox) {
-                      // Click at a reasonable position on the class element
-                      const clickX = classBox.x + 170;
-                      const clickY = classBox.y + 15;
-                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                      await humanDelay(100, 300);
-                      await page.mouse.click(clickX, clickY);
-                      clicked = true;
-                      dlog(`  ✓ Clicked class element directly with offset (170, 15)`);
                     } else {
-                      await classElement.click();
-                      clicked = true;
-                      dlog(`  ✓ Clicked class element directly (no bounding box)`);
+                      // No div.title found, try clicking the class element itself with offset
+                      dlog(`  div.title not found, clicking class element directly with offset...`);
+                      try {
+                        await classElement.click({ offset: { x: 170, y: 15 } });
+                        clicked = true;
+                        dlog(`  ✓ Clicked class element using .click() with offset`);
+                      } catch (e) {
+                        // Final fallback
+                        await classElement.click();
+                        clicked = true;
+                        dlog(`  ✓ Clicked class element directly`);
+                      }
                     }
                   }
                 } else {
@@ -2889,7 +2863,7 @@ async function bookClass({
                 dlog(`  ⚠ Class element not found with selector: ${classInfo.selector}`);
               }
             } catch (e) {
-              dlog(`  Failed to click class element using classInfo.selector: ${e?.message}`);
+              dlog(`  Failed to click class element: ${e?.message}`);
             }
           }
           
