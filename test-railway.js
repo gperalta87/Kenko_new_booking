@@ -1,8 +1,8 @@
-// Local test script for booking endpoint
-// Usage: node test-local.js
+// Railway test script for booking endpoint
+// Usage: node test-railway.js
 
 const testBooking = async () => {
-  const baseUrl = "http://localhost:3000";
+  const baseUrl = "https://kenkonewbooking-production.up.railway.app";
   
   const testData = {
     email: "ocapur@gmail.com",
@@ -10,10 +10,10 @@ const testBooking = async () => {
     gymName: "PontePila",
     targetDate: "2025-11-27", // Format: YYYY-MM-DD
     targetTime: "9:00 am", // Format: HH:mm or "9:00 am"
-    debug: true // Set to true to see browser (if not in production mode)
+    debug: false // Railway runs in headless mode
   };
 
-  console.log("🏠 Testing local booking endpoint...");
+  console.log("🚂 Testing Railway booking endpoint...");
   console.log("🌐 Target URL:", baseUrl);
   console.log("📋 Test data:", JSON.stringify(testData, null, 2));
   console.log("");

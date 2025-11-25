@@ -3030,62 +3030,108 @@ async function bookClass({
             };
           }).catch(() => ({ isBookedModal: false, potentialBookingButtons: [], hasBookCustomerButton: false, modalText: '' }));
           
-          // If we're in the "Booked 0/" modal, try to click a button to open the booking dialog
+          // If we're in the "Booked 0/" modal, close it and retry clicking the class
           if (modalCheck.isBookedModal) {
-            logToFile(`⚠ Detected "Booked 0/" modal (automation detection) - this is NOT the booking dialog`);
-            dlog(`⚠ Detected "Booked 0/" modal - found ${modalCheck.potentialBookingButtons.length} potential booking buttons`);
+            logToFile(`⚠ Detected "Booked 0/" modal (automation detection) - closing modal and retrying class click`);
+            dlog(`⚠ Detected "Booked 0/" modal - will close and re-click class on calendar`);
             
             // Take screenshot to see what's available
             await takeScreenshot(`detected-booked-modal-attempt-${attempt}`);
             
-            if (modalCheck.potentialBookingButtons.length > 0) {
-              // Log all potential buttons found
-              for (const btn of modalCheck.potentialBookingButtons) {
-                logToFile(`  Found potential booking button: "${btn.text}" (aria-label: "${btn.ariaLabel}", class: "${btn.className}")`);
-                dlog(`  Found potential booking button: "${btn.text}" at (${btn.x}, ${btn.y})`);
-              }
+            // Close the modal by finding and clicking the exit/close button
+            const exitButtonInfo = await page.evaluate(() => {
+              const viewportHeight = window.innerHeight;
+              const viewportWidth = window.innerWidth;
               
-              // Try clicking buttons in order of preference (prefer "Book Customer" or "Add Customer" text)
-              let clicked = false;
-              for (const bookingButton of modalCheck.potentialBookingButtons) {
-                const btnText = bookingButton.text.toLowerCase();
-                if (btnText.includes('book customer') || btnText.includes('add customer') || btnText === '+' || btnText === 'add') {
-                  logToFile(`  Attempting to click button: "${bookingButton.text}" (aria-label: "${bookingButton.ariaLabel}")`);
-                  dlog(`  Attempting to click button: "${bookingButton.text}" at (${bookingButton.x}, ${bookingButton.y})`);
-                  
-                  try {
-                    await page.mouse.click(bookingButton.x, bookingButton.y);
-                    logClick('Open booking dialog from "Booked 0/" modal', `mouse.click(${bookingButton.x}, ${bookingButton.y})`, 'Puppeteer.mouse.click(coordinates)');
-                    logToFile(`✓ Clicked potential booking button: "${bookingButton.text}"`);
-                    await sleep(2000); // Wait for booking dialog to open
-                    clicked = true;
-                    break;
-                  } catch (e) {
-                    logToFile(`⚠ Failed to click booking button "${bookingButton.text}": ${e?.message}`);
-                    dlog(`⚠ Failed to click booking button "${bookingButton.text}": ${e?.message}`);
+              // Strategy 1: Look for buttons with SVG icons (X icon in circle)
+              const allButtons = Array.from(document.querySelectorAll('button, [role="button"], div[onclick], div[cursor="pointer"]'));
+              for (const btn of allButtons) {
+                if (btn.offsetParent === null) continue; // Skip hidden elements
+                
+                const rect = btn.getBoundingClientRect();
+                
+                // Check if it's in the top left area (top 25% and left 25% of viewport)
+                if (rect.top < viewportHeight * 0.25 && rect.left < viewportWidth * 0.25) {
+                  // Check if it's a small button (close buttons are usually small)
+                  if (rect.width < 80 && rect.height < 80) {
+                    // Check if it contains an SVG (X icon)
+                    const hasSvg = btn.querySelector('svg') !== null;
+                    
+                    // Check if it has a circle background (dark grey circle)
+                    const styles = window.getComputedStyle(btn);
+                    const bgColor = styles.backgroundColor;
+                    const borderRadius = styles.borderRadius;
+                    const hasCircleBg = borderRadius.includes('50%') || borderRadius.includes('9999px') || 
+                                       bgColor.includes('rgb') || bgColor.includes('rgba');
+                    
+                    // Check text/aria-label
+                    const text = (btn.textContent || '').trim().toLowerCase();
+                    const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                    const hasCloseText = text === 'x' || text === '×' || ariaLabel.includes('close') || 
+                                       ariaLabel.includes('exit') || ariaLabel.includes('dismiss');
+                    
+                    // If it has SVG or close text, or looks like a circular button, it's likely the close button
+                    if (hasSvg || hasCloseText || (hasCircleBg && rect.width < 50 && rect.height < 50)) {
+                      return { 
+                        found: true, 
+                        selector: 'top-left-svg-button', 
+                        x: rect.left + rect.width / 2, 
+                        y: rect.top + rect.height / 2,
+                        text: text,
+                        ariaLabel: ariaLabel
+                      };
+                    }
                   }
                 }
               }
               
-              // If no preferred button was clicked, try the first one
-              if (!clicked && modalCheck.potentialBookingButtons.length > 0) {
-                const bookingButton = modalCheck.potentialBookingButtons[0];
-                logToFile(`  Attempting to click first available button: "${bookingButton.text}"`);
-                dlog(`  Attempting to click first available button: "${bookingButton.text}" at (${bookingButton.x}, ${bookingButton.y})`);
-                
-                try {
-                  await page.mouse.click(bookingButton.x, bookingButton.y);
-                  logClick('Open booking dialog from "Booked 0/" modal (fallback)', `mouse.click(${bookingButton.x}, ${bookingButton.y})`, 'Puppeteer.mouse.click(coordinates)');
-                  logToFile(`✓ Clicked potential booking button (fallback)`);
-                  await sleep(2000); // Wait for booking dialog to open
-                } catch (e) {
-                  logToFile(`⚠ Failed to click booking button (fallback): ${e?.message}`);
-                  dlog(`⚠ Failed to click booking button (fallback): ${e?.message}`);
-                }
+              return { found: false, x: 0, y: 0, selector: '', text: '', ariaLabel: '' };
+            }).catch(() => ({ found: false, x: 0, y: 0, selector: '', text: '', ariaLabel: '' }));
+            
+            if (exitButtonInfo.found) {
+              logToFile(`✓ Found exit/close button at (${exitButtonInfo.x}, ${exitButtonInfo.y}) - selector: ${exitButtonInfo.selector}`);
+              dlog(`✓ Found exit/close button: text="${exitButtonInfo.text}", aria-label="${exitButtonInfo.ariaLabel}"`);
+              
+              // Click using Puppeteer mouse click for better reliability
+              try {
+                await page.mouse.click(exitButtonInfo.x, exitButtonInfo.y);
+                logClick('Exit/Close button (Booked 0/ modal)', `mouse.click(${exitButtonInfo.x}, ${exitButtonInfo.y})`, 'Puppeteer.mouse.click(coordinates)');
+                logToFile(`✓ Clicked exit/close button using coordinates`);
+                dlog(`✓ Clicked exit/close button using coordinates`);
+                await sleep(500);
+              } catch (e) {
+                logToFile(`⚠ Failed to click exit button by coordinates: ${e?.message}, trying Escape key...`);
+                dlog(`⚠ Failed to click exit button by coordinates: ${e?.message}, trying Escape key...`);
+                await page.keyboard.press('Escape');
+                await sleep(500);
               }
             } else {
-              logToFile(`⚠ No booking buttons found in "Booked 0/" modal - may need manual inspection`);
-              dlog(`⚠ No booking buttons found in "Booked 0/" modal - automation may be fully blocked`);
+              logToFile(`⚠ Exit button not found, using Escape key fallback`);
+              dlog(`⚠ Exit button not found, using Escape key fallback`);
+              await page.keyboard.press('Escape');
+              await sleep(500);
+            }
+            
+            // Press Escape multiple times to ensure modal is closed
+            await page.keyboard.press('Escape');
+            await sleep(500);
+            await page.keyboard.press('Escape');
+            await sleep(500);
+            
+            // Wait for calendar to be visible again
+            await sleep(1000);
+            
+            logToFile(`✓ Closed "Booked 0/" modal - will retry clicking class on calendar`);
+            dlog(`✓ Closed "Booked 0/" modal - will retry clicking class on calendar`);
+            
+            // Skip the rest of this attempt and continue to next iteration (which will re-click the class)
+            if (attempt < MAX_CLASS_CLICK_RETRIES) {
+              logToFile(`⚠ "Booked 0/" modal detected - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
+              dlog(`⚠ "Booked 0/" modal detected - will retry (attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES})`);
+              continue; // Continue to next iteration of retry loop
+            } else {
+              logToFile(`❌ ERROR: "Booked 0/" modal appeared on final attempt`);
+              throw new Error(`Booking dialog did not open - "Booked 0/" modal appeared after ${MAX_CLASS_CLICK_RETRIES} attempts`);
             }
           }
           
