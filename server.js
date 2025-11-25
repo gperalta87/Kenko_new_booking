@@ -2022,31 +2022,75 @@ async function bookClass({
         }
         
         // Try to find the date using table structure (matching Puppeteer recording pattern)
+        // IMPORTANT: Only click dates that belong to the current month (not grayed out dates from other months)
         const table = document.querySelector('bs-days-calendar-view table, bs-calendar-layout table, [class*="datepicker"] table');
         if (table) {
           const rows = table.querySelectorAll('tbody tr, tr');
           for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
             const cells = rows[rowIdx].querySelectorAll('td');
             for (let cellIdx = 0; cellIdx < cells.length; cellIdx++) {
-              const span = cells[cellIdx].querySelector('span');
+              const cell = cells[cellIdx];
+              const span = cell.querySelector('span');
               if (span && span.offsetParent !== null && span.textContent?.trim() === String(targetDay)) {
-                console.log(`[BROWSER] Found target date ${targetDay} at row ${rowIdx + 1}, column ${cellIdx + 1}, clicking...`);
-                span.click();
-                return { success: true, method: 'table_click' };
+                // Check if this cell belongs to the current month (not a grayed-out date from another month)
+                // Dates from other months are usually disabled, have different classes, or are grayed out
+                const cellClasses = cell.className || '';
+                const spanClasses = span.className || '';
+                const isDisabled = cell.hasAttribute('disabled') || span.hasAttribute('disabled') ||
+                                 cellClasses.includes('disabled') || spanClasses.includes('disabled') ||
+                                 cellClasses.includes('off') || spanClasses.includes('off') ||
+                                 cellClasses.includes('other-month') || spanClasses.includes('other-month');
+                
+                // Check if the cell/span is grayed out (opacity < 1 or color is gray)
+                const styles = window.getComputedStyle(span);
+                const opacity = parseFloat(styles.opacity || '1');
+                const color = styles.color || '';
+                const isGrayedOut = opacity < 0.5 || color.includes('128') || color.includes('gray') || color.includes('grey');
+                
+                // Only click if it's NOT disabled and NOT grayed out (belongs to current month)
+                if (!isDisabled && !isGrayedOut) {
+                  console.log(`[BROWSER] Found target date ${targetDay} at row ${rowIdx + 1}, column ${cellIdx + 1} (current month), clicking...`);
+                  span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                  span.click();
+                  return { success: true, method: 'table_click' };
+                } else {
+                  console.log(`[BROWSER] Found date ${targetDay} but it's from another month (disabled/grayed out), skipping...`);
+                }
               }
             }
           }
         }
         
-        // Fallback: try generic span selector
+        // Fallback: try generic span selector, but only for dates in current month
         const daySpans = document.querySelectorAll('bs-days-calendar-view table td span, [class*="datepicker"] table td span, tr td span');
         for (const span of daySpans) {
           if (span.offsetParent === null) continue;
           const spanText = span.textContent?.trim();
           if (spanText === String(targetDay)) {
-            console.log(`[BROWSER] Found target date ${targetDay} using fallback selector, clicking...`);
-            span.click();
-            return { success: true, method: 'fallback_click' };
+            // Check if this date belongs to current month (not grayed out)
+            const cell = span.closest('td');
+            if (cell) {
+              const cellClasses = cell.className || '';
+              const spanClasses = span.className || '';
+              const isDisabled = cell.hasAttribute('disabled') || span.hasAttribute('disabled') ||
+                               cellClasses.includes('disabled') || spanClasses.includes('disabled') ||
+                               cellClasses.includes('off') || spanClasses.includes('off') ||
+                               cellClasses.includes('other-month') || spanClasses.includes('other-month');
+              
+              const styles = window.getComputedStyle(span);
+              const opacity = parseFloat(styles.opacity || '1');
+              const color = styles.color || '';
+              const isGrayedOut = opacity < 0.5 || color.includes('128') || color.includes('gray') || color.includes('grey');
+              
+              if (!isDisabled && !isGrayedOut) {
+                console.log(`[BROWSER] Found target date ${targetDay} using fallback selector (current month), clicking...`);
+                span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                span.click();
+                return { success: true, method: 'fallback_click' };
+              } else {
+                console.log(`[BROWSER] Found date ${targetDay} but it's from another month, skipping...`);
+              }
+            }
           }
         }
         
@@ -2070,10 +2114,29 @@ async function bookClass({
             for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
               const cells = rows[rowIdx].querySelectorAll('td');
               for (let cellIdx = 0; cellIdx < cells.length; cellIdx++) {
-                const span = cells[cellIdx].querySelector('span');
+                const cell = cells[cellIdx];
+                const span = cell.querySelector('span');
                 if (span && span.offsetParent !== null && span.textContent?.trim() === String(targetDay)) {
+                  // CRITICAL: Check if this date belongs to the current month (not a grayed-out date from another month)
+                  const cellClasses = cell.className || '';
+                  const spanClasses = span.className || '';
+                  const isDisabled = cell.hasAttribute('disabled') || span.hasAttribute('disabled') ||
+                                   cellClasses.includes('disabled') || spanClasses.includes('disabled') ||
+                                   cellClasses.includes('off') || spanClasses.includes('off') ||
+                                   cellClasses.includes('other-month') || spanClasses.includes('other-month');
+                  
+                  const styles = window.getComputedStyle(span);
+                  const opacity = parseFloat(styles.opacity || '1');
+                  const color = styles.color || '';
+                  const isGrayedOut = opacity < 0.5 || color.includes('128') || color.includes('gray') || color.includes('grey');
+                  
+                  // Skip dates from other months
+                  if (isDisabled || isGrayedOut) {
+                    console.log(`[BROWSER] Found day ${targetDay} but it's from another month (disabled/grayed out), skipping...`);
+                    continue;
+                  }
+                  
                   // Check if this date cell is in the right month/year by checking parent context
-                  // Look for month/year indicators in nearby headers or parent elements
                   const calendarView = span.closest('bs-days-calendar-view') || span.closest('bs-calendar-layout');
                   if (calendarView) {
                     const calendarText = calendarView.textContent || '';
@@ -2094,7 +2157,7 @@ async function bookClass({
                   if (targetMonth === 11) {
                     const calendarText = document.querySelector('bs-days-calendar-view, bs-calendar-layout')?.textContent || '';
                     if (calendarText.includes('November') || calendarText.includes('Nov')) {
-                      console.log(`[BROWSER] Found day ${targetDay} in November context, clicking...`);
+                      console.log(`[BROWSER] Found day ${targetDay} in November context (current month), clicking...`);
                       span.scrollIntoView({ behavior: 'smooth', block: 'center' });
                       span.click();
                       return { success: true, method: 'direct_november' };
@@ -2114,15 +2177,42 @@ async function bookClass({
           dlog(`✓ ${dateMethodMsg}`);
           await sleep(1500);
           
-          // Verify date picker closed
-          const dateSelected = await page.evaluate(() => {
+          // Verify date picker closed AND verify the correct date is displayed
+          const dateVerification = await page.evaluate((targetDay, targetMonth, targetYear) => {
             const container = document.querySelector('bs-datepicker-container');
-            return !container || container.offsetParent === null;
-          }).catch(() => false);
+            const pickerClosed = !container || container.offsetParent === null;
+            
+            // Check what date is actually displayed in the calendar view
+            // Look for the date button text (e.g., "Nov 27, 2025")
+            const dateButton = Array.from(document.querySelectorAll('div, button, span')).find(el => {
+              if (el.offsetParent === null) return false;
+              const text = (el.textContent || '').trim();
+              // Match formats like "Nov 27, 2025", "November 27, 2025", "27 Nov 2025"
+              const datePatterns = [
+                new RegExp(`(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+${targetDay}\\s*,?\\s*${targetYear}`, 'i'),
+                new RegExp(`(January|February|March|April|May|June|July|August|September|October|November|December)\\s+${targetDay}\\s*,?\\s*${targetYear}`, 'i'),
+                new RegExp(`${targetDay}\\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+${targetYear}`, 'i')
+              ];
+              return datePatterns.some(pattern => pattern.test(text));
+            });
+            
+            const correctDateDisplayed = dateButton !== undefined;
+            
+            return {
+              pickerClosed: pickerClosed,
+              correctDateDisplayed: correctDateDisplayed,
+              dateButtonText: dateButton ? (dateButton.textContent || '').trim() : null
+            };
+          }, day, month, year).catch(() => ({ pickerClosed: false, correctDateDisplayed: false, dateButtonText: null }));
           
-          if (dateSelected) {
-            dlog(`✓ Date picker closed, date selected successfully`);
+          if (dateVerification.pickerClosed && dateVerification.correctDateDisplayed) {
+            dlog(`✓ Date picker closed and correct date (${day}/${month}/${year}) is displayed: "${dateVerification.dateButtonText}"`);
+            logToFile(`✓ Date verification passed: ${day}/${month}/${year} displayed as "${dateVerification.dateButtonText}"`);
             await takeScreenshot('after-date-selected-direct');
+          } else if (dateVerification.pickerClosed) {
+            dlog(`⚠ Date picker closed but date verification failed - may not have selected correct date`);
+            logToFile(`⚠ Date picker closed but correct date not verified. Date button text: "${dateVerification.dateButtonText || 'not found'}"`);
+            await takeScreenshot('after-date-selected-direct-warning');
           } else {
             dlog(`⚠ Date picker still open, but continuing...`);
             await takeScreenshot('after-date-selected-direct-picker-open');
@@ -2258,20 +2348,43 @@ async function bookClass({
               dlog(`✓ ${dayPickerMethodMsg}`);
               await sleep(1500);
               
-              // Verify the date was actually selected
-              const dateSelected = await page.evaluate(() => {
-                // Check if the date picker closed or if the date is now selected
+              // Verify the date was actually selected AND verify correct date is displayed
+              const dateVerification = await page.evaluate((targetDay, targetMonth, targetYear) => {
                 const container = document.querySelector('bs-datepicker-container');
-                if (!container || container.offsetParent === null) {
-                  return true; // Date picker closed, date was likely selected
-                }
-                return false;
-              }).catch(() => false);
+                const pickerClosed = !container || container.offsetParent === null;
+                
+                // Check what date is actually displayed in the calendar view
+                const dateButton = Array.from(document.querySelectorAll('div, button, span')).find(el => {
+                  if (el.offsetParent === null) return false;
+                  const text = (el.textContent || '').trim();
+                  // Match formats like "Nov 27, 2025", "November 27, 2025", "27 Nov 2025"
+                  const datePatterns = [
+                    new RegExp(`(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+${targetDay}\\s*,?\\s*${targetYear}`, 'i'),
+                    new RegExp(`(January|February|March|April|May|June|July|August|September|October|November|December)\\s+${targetDay}\\s*,?\\s*${targetYear}`, 'i'),
+                    new RegExp(`${targetDay}\\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+${targetYear}`, 'i')
+                  ];
+                  return datePatterns.some(pattern => pattern.test(text));
+                });
+                
+                const correctDateDisplayed = dateButton !== undefined;
+                
+                return {
+                  pickerClosed: pickerClosed,
+                  correctDateDisplayed: correctDateDisplayed,
+                  dateButtonText: dateButton ? (dateButton.textContent || '').trim() : null
+                };
+              }, day, month, year).catch(() => ({ pickerClosed: false, correctDateDisplayed: false, dateButtonText: null }));
               
-              if (dateSelected) {
-                dlog(`✓ Date picker closed, date should be selected`);
+              if (dateVerification.pickerClosed && dateVerification.correctDateDisplayed) {
+                dlog(`✓ Date picker closed and correct date (${day}/${month}/${year}) is displayed: "${dateVerification.dateButtonText}"`);
+                logToFile(`✓ Date verification passed: ${day}/${month}/${year} displayed as "${dateVerification.dateButtonText}"`);
                 await takeScreenshot('after-date-selected-navigation');
                 break; // Exit navigation loop
+              } else if (dateVerification.pickerClosed) {
+                dlog(`⚠ Date picker closed but date verification failed - may not have selected correct date`);
+                logToFile(`⚠ Date picker closed but correct date not verified. Date button text: "${dateVerification.dateButtonText || 'not found'}"`);
+                await takeScreenshot('after-date-selected-navigation-warning');
+                // Don't break - continue trying
               } else {
                 dlog(`⚠ Date picker still open, may need to click again`);
                 await takeScreenshot('after-date-selected-navigation-picker-open');
