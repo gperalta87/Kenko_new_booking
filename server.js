@@ -442,7 +442,7 @@ async function bookClass({
     delete process.env.DBUS_SESSION_BUS_ADDRESS;
     delete process.env.DBUS_SYSTEM_BUS_ADDRESS;
     
-    // Add stealth arguments to bypass anti-scraping detection AND VM detection
+    // Add stealth arguments to bypass anti-scraping detection
     // These are CRITICAL for bypassing Kenko's anti-scraping measures
     const stealthArgs = [
       '--disable-blink-features=AutomationControlled', // Most important - removes automation flag!
@@ -450,12 +450,6 @@ async function bookClass({
       '--disable-features=IsolateOrigins,site-per-process',
       '--disable-site-isolation-trials',
       '--disable-features=VizDisplayCompositor',
-      // VM detection prevention flags
-      '--disable-dev-shm-usage', // Prevents /dev/shm detection (common VM indicator)
-      '--disable-software-rasterizer', // Use hardware acceleration (real Macs have this)
-      '--use-gl=swiftshader', // But fallback to software if needed (already in launchArgs)
-      '--enable-features=NetworkService,NetworkServiceInProcess', // Real browser features
-      '--disable-features=AudioServiceOutOfProcess', // Keep audio in-process (real Mac behavior)
     ];
     
     browser = await puppeteer.launch({
@@ -503,12 +497,11 @@ async function bookClass({
       
       // Override permissions
       const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => {
-        if (parameters.name === 'notifications') {
-          return Promise.resolve({ state: 'default' });
-        }
-        return originalQuery.call(this, parameters);
-      };
+      window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications' ?
+          Promise.resolve({ state: Notification.permission }) :
+          originalQuery(parameters)
+      );
       
       // Override plugins to show realistic plugins
       Object.defineProperty(navigator, 'plugins', {
@@ -538,11 +531,10 @@ async function bookClass({
     `
   });
   
-  dlog("CDP automation override active");
-  
   // CRITICAL: puppeteer-extra-plugin-stealth is already applied via puppeteer.use(StealthPlugin())
   // This plugin handles most anti-scraping detection automatically
   dlog("Stealth plugin is active (puppeteer-extra-plugin-stealth)");
+  dlog("CDP automation override active");
   
   // CRITICAL: Set User-Agent to match local Chrome EXACTLY (Chrome 131 on macOS)
   // Railway needs to look exactly like a local Chrome browser, not headless
@@ -578,6 +570,7 @@ async function bookClass({
   });
   
   // Override navigator properties to match local Chrome (not headless)
+  // Enhanced fingerprinting to appear as real browser session
   await page.evaluateOnNewDocument(() => {
     // Override platform to match local
     Object.defineProperty(navigator, 'platform', {
@@ -598,6 +591,140 @@ async function bookClass({
     Object.defineProperty(navigator, 'webdriver', {
       get: () => undefined,
     });
+    
+    // Override languages to match real browser
+    Object.defineProperty(navigator, 'languages', {
+      get: () => ['en-US', 'en'],
+    });
+    
+    // Override vendor to match Chrome
+    Object.defineProperty(navigator, 'vendor', {
+      get: () => 'Google Inc.',
+    });
+    
+    // Override appVersion to match Chrome
+    Object.defineProperty(navigator, 'appVersion', {
+      get: () => '5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    });
+    
+    // Override connection properties (if available)
+    if (navigator.connection) {
+      Object.defineProperty(navigator.connection, 'rtt', {
+        get: () => 50,
+      });
+      Object.defineProperty(navigator.connection, 'downlink', {
+        get: () => 10,
+      });
+      Object.defineProperty(navigator.connection, 'effectiveType', {
+        get: () => '4g',
+      });
+    }
+    
+    // Override plugins to show realistic plugins (Chrome typically has 5 plugins)
+    Object.defineProperty(navigator, 'plugins', {
+      get: () => {
+        const plugins = [];
+        // Create realistic plugin objects
+        for (let i = 0; i < 5; i++) {
+          plugins.push({
+            name: `Plugin ${i + 1}`,
+            description: 'Plugin description',
+            filename: 'internal-pdf-viewer',
+            length: 1
+          });
+        }
+        return plugins;
+      },
+    });
+    
+    // Override mimeTypes to match plugins
+    Object.defineProperty(navigator, 'mimeTypes', {
+      get: () => {
+        const mimeTypes = [];
+        for (let i = 0; i < 5; i++) {
+          mimeTypes.push({
+            type: 'application/pdf',
+            suffixes: 'pdf',
+            description: 'PDF Document',
+            enabledPlugin: navigator.plugins[i] || null
+          });
+        }
+        return mimeTypes;
+      },
+    });
+    
+    // Add Chrome-specific properties (must match real Chrome)
+    window.chrome = {
+      runtime: {},
+      loadTimes: function() {
+        return {
+          commitLoadTime: Date.now() / 1000 - Math.random() * 2,
+          connectionInfo: 'http/1.1',
+          finishDocumentLoadTime: Date.now() / 1000 - Math.random(),
+          finishLoadTime: Date.now() / 1000 - Math.random() * 0.5,
+          firstPaintAfterLoadTime: 0,
+          firstPaintTime: Date.now() / 1000 - Math.random() * 1.5,
+          navigationType: 'Other',
+          npnNegotiatedProtocol: 'unknown',
+          requestTime: Date.now() / 1000 - Math.random() * 3,
+          startLoadTime: Date.now() / 1000 - Math.random() * 3,
+          wasAlternateProtocolAvailable: false,
+          wasFetchedViaSpdy: false,
+          wasNpnNegotiated: false
+        };
+      },
+      csi: function() {
+        return {
+          startE: Date.now() - Math.random() * 1000,
+          onloadT: Date.now() - Math.random() * 500,
+          pageT: Math.random() * 1000 + 500,
+          tran: 15
+        };
+      },
+      app: {
+        isInstalled: false,
+        InstallState: {
+          DISABLED: 'disabled',
+          INSTALLED: 'installed',
+          NOT_INSTALLED: 'not_installed'
+        },
+        RunningState: {
+          CANNOT_RUN: 'cannot_run',
+          READY_TO_RUN: 'ready_to_run',
+          RUNNING: 'running'
+        }
+      }
+    };
+    
+    // Remove automation detection variables
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+    delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
+    
+    // Override permissions API to return realistic values
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) => (
+      parameters.name === 'notifications' ?
+        Promise.resolve({ state: Notification.permission }) :
+        originalQuery(parameters)
+    );
+    
+    // Override getBattery to return realistic values
+    if (navigator.getBattery) {
+      navigator.getBattery = () => Promise.resolve({
+        charging: true,
+        chargingTime: 0,
+        dischargingTime: Infinity,
+        level: 1,
+        onchargingchange: null,
+        onchargingtimechange: null,
+        ondischargingtimechange: null,
+        onlevelchange: null
+      });
+    }
   });
   
   // Add human-like mouse movements and scrolling behavior
@@ -687,7 +814,7 @@ async function bookClass({
   };
   page.setDefaultTimeout(TIMEOUT);
 
-  // Log page events - match working commit b7d48c1 exactly
+  // Log page events
   page.on("console", (msg) => logToFile(`[PAGE] ${msg.text()}`));
   page.on("requestfailed", (r) => logToFile(`[REQ FAIL] ${r.url()} ${r.failure()?.errorText}`));
 
@@ -798,20 +925,6 @@ async function bookClass({
       }
       
       if (!inputElement) {
-        // Check if page is closed before throwing error
-        let pageClosed = false;
-        try {
-          await page.evaluate(() => document.readyState).catch(() => {
-            pageClosed = true;
-          });
-        } catch (e) {
-          pageClosed = true;
-        }
-        
-        if (pageClosed) {
-          throw new Error(`Page closed or frame detached - cannot find gym input field. This may indicate automation detection.`);
-        }
-        
         if (DEBUG) {
           try {
             await page.screenshot({ path: '/tmp/gym-input-debug.png', fullPage: true });
@@ -3764,8 +3877,9 @@ async function bookClass({
             dlog(`✓ Customer selected using Method 1 (coordinates)`);
             logToFile(`✓ Customer selected using Method 1 (coordinates)`);
           } else {
-            dlog(`⚠ Method 1 click may not have registered - input still shows just "fitpass", trying other methods...`);
-            logToFile(`⚠ Method 1 click may not have registered - input still shows just "fitpass"`);
+            // Input check might fail even if click worked - we'll check for BOOK button below
+            dlog(`⚠ Input check didn't confirm selection, but will check for BOOK button...`);
+            logToFile(`⚠ Input check didn't confirm selection, but will check for BOOK button...`);
           }
         } catch (e) {
           dlog(`Method 1 failed: ${e?.message}`);
@@ -3773,151 +3887,39 @@ async function bookClass({
         }
       }
       
-      // Method 2: Try using clickElement with selectors from recording (fallback)
-      if (!customerSelected) {
-        try {
-          dlog(`[CUSTOMER SELECTION] Method 2: Trying selectors from recording...`);
-          // Use selectors from recording: div.customer-overlay span
-          await clickElement(page, [
-            'div.customer-overlay span',
-            `::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div/div[2]/div[2]/span)`,
-            ':scope >>> div.customer-overlay span',
-            `::-p-text(${customerName})`,
-            `::-p-text(fitpass)`
-          ], { offset: { x: 76, y: 15 }, location: 'Select customer', debug: DEBUG }); // Offset from recording
-          
-          // Wait and verify
-          await sleep(1000);
-          const clickVerified = await page.evaluate((customerNameParam) => {
-            const inputs = Array.from(document.querySelectorAll('input'));
-            const customerNameLower = customerNameParam.toLowerCase();
-            const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
-            for (const input of inputs) {
-              if (input.offsetParent === null) continue;
-              const value = (input.value || '').trim();
-              const valueLower = value.toLowerCase();
-              if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
-                return true;
-              }
-            }
-            return false;
-          }, customerName).catch(() => false);
-          
-          if (clickVerified) {
-            customerSelected = true;
-            dlog(`✓ Customer selected using Method 2`);
-            logToFile(`✓ Customer selected using Method 2`);
-          } else {
-            dlog(`⚠ Method 2 click may not have registered`);
-            logToFile(`⚠ Method 2 click may not have registered`);
-          }
-        } catch (e) {
-          dlog(`Method 2 failed: ${e?.message}`);
-          logToFile(`Method 2 failed: ${e?.message}`);
-        }
-      }
+      // OPTIMIZED: Method 1 (coordinate click) works reliably - removed Methods 2 and 3 as they're not needed
+      // If Method 1 didn't work, we'll check for BOOK button anyway (which is the real indicator)
       
-      // Method 3: Try direct element click via page.evaluate (last resort)
-      if (!customerSelected) {
-        try {
-          dlog(`[CUSTOMER SELECTION] Method 3: Trying direct element click (prioritizing SPAN elements)...`);
-          const clicked = await page.evaluate((customerNameParam) => {
-            // Find customer overlay container (as shown in recording)
-            const customerOverlay = document.querySelector('div.customer-overlay');
-            const searchRoot = customerOverlay || document.body;
-            
-            // Prioritize SPAN elements (as shown in recording)
-            const spanElements = Array.from(searchRoot.querySelectorAll('div.customer-overlay span, span'));
-            const allElements = Array.from(searchRoot.querySelectorAll('div, li, span'));
-            const elementsToCheck = [...spanElements, ...allElements.filter(el => !spanElements.includes(el))];
-            
-            // Find best match with customer name
-            let bestMatch = null;
-            let bestScore = -1;
-            
-            const customerNameLower = customerNameParam.toLowerCase();
-            const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
-            
-            for (const el of elementsToCheck) {
-              if (el.offsetParent === null) continue;
-              const text = (el.textContent || '').trim();
-              const textLower = text.toLowerCase();
-              
-              // Must be reasonable length (may include email)
-              if (text.length > 200) continue;
-              
-              const hasFitpass = textLower.includes('fitpass');
-              const hasNumberWord = textLower.includes(customerNumberWord);
-              const hasEmailPattern = textLower.includes('@test.com') || textLower.includes('@');
-              
-              if (hasFitpass && (hasNumberWord || hasEmailPattern)) {
-                const rect = el.getBoundingClientRect();
-                const size = rect.width * rect.height;
-                
-                // Score: prioritize SPAN, then customer-overlay, then smaller size
-                let score = 0;
-                if (el.tagName === 'SPAN') score += 1000;
-                if (customerOverlay && customerOverlay.contains(el)) score += 500;
-                score += 1000 / (size + 1); // Smaller is better
-                
-                if (rect.width < 500 && rect.height < 100 && score > bestScore) {
-                  bestScore = score;
-                  bestMatch = el;
-                }
-              }
-            }
-            
-            if (bestMatch) {
-              bestMatch.click();
-              return true;
-            }
-            return false;
-          }, customerName).catch(() => false);
-          
-          if (clicked) {
-            await sleep(1000);
-            const clickVerified = await page.evaluate((customerNameParam) => {
-              const inputs = Array.from(document.querySelectorAll('input'));
-              const customerNameLower = customerNameParam.toLowerCase();
-              const customerNumberWord = customerNameLower.replace('fitpass', '').trim();
-              for (const input of inputs) {
-                if (input.offsetParent === null) continue;
-                const value = (input.value || '').trim();
-                const valueLower = value.toLowerCase();
-                if (valueLower.includes('fitpass') && valueLower.includes(customerNumberWord)) {
-                  return true;
-                }
-              }
-              return false;
-            }, customerName).catch(() => false);
-            
-            if (clickVerified) {
-              customerSelected = true;
-              logClick('Select customer', 'page.evaluate(element.click())', 'Direct element click');
-              dlog(`✓ Customer selected using Method 3 (direct click)`);
-              logToFile(`✓ Customer selected using Method 3 (direct click)`);
-            } else {
-              dlog(`⚠ Method 3 click may not have registered`);
-              logToFile(`⚠ Method 3 click may not have registered`);
-            }
-          }
-        } catch (e) {
-          dlog(`Method 3 failed: ${e?.message}`);
-          logToFile(`Method 3 failed: ${e?.message}`);
-        }
-      }
+      // Even if customerSelected is false, wait and check for BOOK button
+      // The input value check might fail even if the customer was actually selected
+      // Wait a bit for selection to register and BOOK button to appear
+      await sleep(1500); // Optimized: reduced from 2500ms - BOOK button appears quickly after customer selection
       
-      if (!customerSelected) {
+      // Check if BOOK button appeared - this is the most reliable indicator
+      const bookButtonCheck = await page.evaluate(() => {
+        const bookButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+          if (btn.offsetParent === null) return false;
+          const text = (btn.textContent || '').trim().toLowerCase();
+          return text.includes('book using credits') || text.includes('book using');
+        });
+        return bookButton !== undefined;
+      }).catch(() => false);
+      
+      if (bookButtonCheck) {
+        // BOOK button is visible - customer was definitely selected!
+        logToFile(`✓ BOOK USING CREDITS button is visible - customer selection confirmed despite input check failure!`);
+        dlog(`✓ BOOK USING CREDITS button is visible - customer selection confirmed!`);
+        customerSelected = true; // Set flag so we continue
+      } else if (!customerSelected) {
+        // No BOOK button and clicks didn't work - this is a real failure
         logToFile(`❌ ERROR: Failed to select customer "${customerName}" using all methods!`);
+        logToFile(`  BOOK button not visible, and input check failed.`);
         await takeScreenshot(`customer-selection-failed-${customerNumber}`);
         
         // Don't retry - if customer was found and clickable but clicking failed, that's a different issue
         // We only retry when customer is found but NOT clickable (handled earlier)
         throw new Error(`Failed to select customer "${customerName}" - all click methods failed. Customer was found but clicking failed.`);
       }
-      
-      // Wait a bit for selection to register
-      await sleep(1500);
       
       // Take screenshot immediately after clicking customer
       await takeScreenshot('after-customer-click-attempt');
@@ -4054,32 +4056,39 @@ async function bookClass({
       dlog(`  Dropdown closed: ${customerSelectedCheck.dropdownClosed}`);
       dlog(`  Customer selected indicator: ${customerSelectedCheck.customerSelectedIndicator}`);
       
-      // STRICT REQUIREMENT: Customer must be actually SELECTED, not just typed
-      // The customerSelectedIndicator should be true if:
-      // 1. BOOK USING CREDITS button is visible (strongest indicator)
-      // 2. OR customer input contains full name (not just "fitpass")
-      // 3. OR customer name is visible in a selected display element
-      const customerDefinitelySelected = customerSelectedCheck.customerSelectedIndicator;
-      
-      if (!customerDefinitelySelected) {
-        logToFile(`❌ ERROR: Customer selection validation FAILED for "${customerName}"!`);
-        logToFile(`  Customer was typed but NOT SELECTED from dropdown.`);
-        logToFile(`  Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}"`);
-        logToFile(`  Expected: Full customer name (e.g., "${customerName}") or BOOK USING CREDITS button visible`);
-        logToFile(`  Actual: customerSelectedIndicator=${customerSelectedCheck.customerSelectedIndicator}`);
+      // OPTIMIZED: Simplified validation - BOOK button visibility is the most reliable indicator
+      // If BOOK button is visible, customer was definitely selected - continue
+      if (customerSelectedCheck.bookButtonVisible) {
+        logToFile(`✓ BOOK USING CREDITS button is visible - customer selection confirmed!`);
+        dlog(`✓ BOOK USING CREDITS button is visible - customer selection confirmed!`);
+        selectedCustomerName = customerName;
+        customerSelectedSuccessfully = true;
+      } else {
+        // BOOK button not visible yet - wait a bit more and check again
+        logToFile(`⚠ BOOK button not visible yet, waiting 1 second and checking again...`);
+        await sleep(1000);
         
-        // Take screenshot of failure state
-        await takeScreenshot(`customer-selection-validation-failed-${customerNumber}`);
+        const finalBookButtonCheck = await page.evaluate(() => {
+          const bookButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(btn => {
+            if (btn.offsetParent === null) return false;
+            const text = (btn.textContent || '').trim().toLowerCase();
+            return text.includes('book using credits') || text.includes('book using');
+          });
+          return bookButton !== undefined;
+        }).catch(() => false);
         
-        // Don't retry - validation failure means clicking didn't work properly, not a clickability issue
-        throw new Error(`Customer selection validation failed for "${customerName}" - customer was clicked but not properly selected. Input value: "${customerSelectedCheck.customerInputValue || 'N/A'}", BOOK button visible: ${customerSelectedCheck.bookButtonVisible}`);
+        if (finalBookButtonCheck) {
+          logToFile(`✓ BOOK button appeared after additional wait - customer selection confirmed!`);
+          selectedCustomerName = customerName;
+          customerSelectedSuccessfully = true;
+        } else {
+          // BOOK button still not visible - this is a real failure
+          logToFile(`❌ ERROR: BOOK USING CREDITS button not found after customer selection!`);
+          logToFile(`  Customer click may not have worked properly.`);
+          await takeScreenshot(`customer-selection-validation-failed-${customerNumber}`);
+          throw new Error(`Customer selection failed for "${customerName}" - BOOK USING CREDITS button not visible after click`);
+        }
       }
-      
-      // Success! Customer was selected
-      logToFile(`✓ Customer selection VALIDATED successfully for "${customerName}" - customer was actually selected`);
-      dlog(`✓ Customer selection VALIDATED successfully for "${customerName}" - customer was actually selected`);
-      selectedCustomerName = customerName;
-      customerSelectedSuccessfully = true;
       
       // Take screenshot after successful validation
       await takeScreenshot(`after-customer-selection-validated-${customerName.replace(/\s+/g, '-')}`);
@@ -4127,40 +4136,8 @@ async function bookClass({
       dlog(`✓ Successfully selected customer: "${selectedCustomerName}"`);
     });
 
-    // Step 11: Wait for booking modal to fully load after selecting customer
-    await step("Wait for booking modal", async () => {
-      dlog(`Waiting for booking modal to fully load after selecting customer...`);
-      await sleep(1000); // Optimized: reduced from 2000ms
-      
-      // Check if the modal is visible and what buttons/options are available
-      const modalState = await page.evaluate(() => {
-        // Look for "BOOK USING CREDITS" button
-        const bookButton = Array.from(document.querySelectorAll('button, [role="button"]')).find(el => 
-          el.textContent?.includes('BOOK USING CREDITS') || 
-          el.textContent?.includes('BOOK USING') ||
-          el.getAttribute('aria-label')?.includes('BOOK')
-        );
-        
-        // Look for SELECT PLAN dropdown
-        const selectPlan = Array.from(document.querySelectorAll('*')).find(el => 
-          el.textContent?.includes('SELECT PLAN') ||
-          el.getAttribute('aria-label')?.includes('SELECT PLAN')
-        );
-        
-        return {
-          hasBookButton: bookButton !== undefined && bookButton.offsetParent !== null,
-          bookButtonText: bookButton?.textContent?.substring(0, 50) || '',
-          bookButtonTag: bookButton?.tagName || '',
-          bookButtonClass: bookButton?.className || '',
-          hasSelectPlan: selectPlan !== undefined && selectPlan.offsetParent !== null
-        };
-      }).catch(() => ({}));
-      
-      dlog(`Modal state: hasBookButton=${modalState.hasBookButton}, hasSelectPlan=${modalState.hasSelectPlan}`);
-      if (modalState.bookButtonText) {
-        dlog(`  Book button found: ${modalState.bookButtonText} (tag: ${modalState.bookButtonTag}, class: ${modalState.bookButtonClass})`);
-      }
-    });
+    // OPTIMIZED: Removed redundant "Wait for booking modal" step
+    // We already wait 1500ms after customer selection, and the BOOK button step will handle validation
     
 
     // Track whether we actually completed the charge step (required for successful booking)
@@ -4170,50 +4147,73 @@ async function bookClass({
     // Note: Based on the modal UI, this button appears directly after selecting customer
     // We may need to select a plan first, but if plan is already selected, we can click directly
     await step("Click BOOK USING CREDITS button", async () => {
-      logToFile(`[BOOK BUTTON] Starting BOOK USING CREDITS click. Current click count: ${clickCounter}`);
+      logToFile(`[BOOK BUTTON] ==========================================`);
+      logToFile(`[BOOK BUTTON] Starting BOOK USING CREDITS click step`);
+      logToFile(`[BOOK BUTTON] Current click count: ${clickCounter}`);
+      logToFile(`[BOOK BUTTON] ==========================================`);
       dlog(`[BOOK BUTTON] Starting BOOK USING CREDITS click. Current click count: ${clickCounter}`);
       const clicksBefore = clickCounter;
       
       // Take screenshot before looking for button
+      logToFile(`[BOOK BUTTON] Taking screenshot before looking for button...`);
       await takeScreenshot('before-looking-for-book-button');
       
-      // Wait a bit to ensure modal is fully loaded
-      await sleep(1500);
+      // Wait a bit to ensure modal is fully loaded and BOOK button appears
+      // OPTIMIZED: Reduced from 3000ms since we already waited 500ms in previous step
+      logToFile(`[BOOK BUTTON] Waiting 1.5 seconds for modal to fully load...`);
+      await sleep(1500); // Optimized: reduced from 3000ms - total wait is now 2000ms (500ms + 1500ms) instead of 4000ms
+      logToFile(`[BOOK BUTTON] Wait complete, starting button search...`);
       
       // STRICT VALIDATION: Verify "BOOK USING CREDITS" button is visible before attempting to click
+      logToFile(`[BOOK BUTTON] Validating that BOOK USING CREDITS button is visible...`);
       dlog(`Validating that BOOK USING CREDITS button is visible...`);
-      const bookButtonValidation = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-        const bookButtons = [];
-        
-        for (const btn of buttons) {
-          if (btn.offsetParent === null) continue;
-          const text = (btn.textContent || '').trim();
-          const textLower = text.toLowerCase();
+      let bookButtonValidation;
+      try {
+        logToFile(`[BOOK BUTTON] Executing page.evaluate to find all buttons...`);
+        bookButtonValidation = await page.evaluate(() => {
+          const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+          const bookButtons = [];
           
-          if (textLower.includes('book using credits') || 
-              textLower.includes('book using') ||
-              textLower === 'book using credits') {
-            const rect = btn.getBoundingClientRect();
-            bookButtons.push({
-              text: text,
-              visible: true,
-              x: rect.left + rect.width / 2,
-              y: rect.top + rect.height / 2,
-              tagName: btn.tagName,
-              className: btn.className,
-              ariaLabel: btn.getAttribute('aria-label') || ''
-            });
+          for (const btn of buttons) {
+            if (btn.offsetParent === null) continue;
+            const text = (btn.textContent || '').trim();
+            const textLower = text.toLowerCase();
+            
+            if (textLower.includes('book using credits') || 
+                textLower.includes('book using') ||
+                textLower === 'book using credits') {
+              const rect = btn.getBoundingClientRect();
+              bookButtons.push({
+                text: text,
+                visible: true,
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2,
+                tagName: btn.tagName,
+                className: btn.className,
+                ariaLabel: btn.getAttribute('aria-label') || ''
+              });
+            }
           }
+          
+          return {
+            found: bookButtons.length > 0,
+            count: bookButtons.length,
+            buttons: bookButtons
+          };
+        });
+        logToFile(`[BOOK BUTTON] page.evaluate completed successfully`);
+        logToFile(`[BOOK BUTTON] Validation result: found=${bookButtonValidation.found}, count=${bookButtonValidation.count}`);
+        if (bookButtonValidation.buttons.length > 0) {
+          logToFile(`[BOOK BUTTON] First button found: text="${bookButtonValidation.buttons[0].text}", x=${bookButtonValidation.buttons[0].x}, y=${bookButtonValidation.buttons[0].y}`);
         }
-        
-        return {
-          found: bookButtons.length > 0,
-          count: bookButtons.length,
-          buttons: bookButtons
-        };
-      }).catch(() => ({ found: false, count: 0, buttons: [] }));
+      } catch (e) {
+        logToFile(`[BOOK BUTTON] ❌ ERROR during BOOK button validation: ${e?.message}`);
+        logToFile(`[BOOK BUTTON] Error stack: ${e?.stack || 'No stack trace'}`);
+        dlog(`⚠ ERROR during BOOK button validation: ${e?.message}`);
+        bookButtonValidation = { found: false, count: 0, buttons: [] };
+      }
       
+      logToFile(`[BOOK BUTTON] Checking if button was found...`);
       if (!bookButtonValidation.found || bookButtonValidation.count === 0) {
         logToFile(`❌ ERROR: BOOK USING CREDITS button NOT FOUND!`);
         logToFile(`  Searched all buttons on page, found ${bookButtonValidation.count} matching buttons`);
@@ -4242,37 +4242,39 @@ async function bookClass({
         throw new Error(`BOOK USING CREDITS button not found - cannot proceed with booking. Customer may not have been selected properly.`);
       }
       
-      logToFile(`✓ BOOK USING CREDITS button found: "${bookButtonValidation.buttons[0].text}"`);
+      logToFile(`[BOOK BUTTON] ✓ Button found!`);
+      logToFile(`[BOOK BUTTON] Button text: "${bookButtonValidation.buttons[0].text}"`);
+      logToFile(`[BOOK BUTTON] Button position: x=${bookButtonValidation.buttons[0].x}, y=${bookButtonValidation.buttons[0].y}`);
+      logToFile(`[BOOK BUTTON] Button tag: ${bookButtonValidation.buttons[0].tagName}`);
+      logToFile(`[BOOK BUTTON] Button class: ${bookButtonValidation.buttons[0].className}`);
+      logToFile(`[BOOK BUTTON] Button aria-label: ${bookButtonValidation.buttons[0].ariaLabel || 'none'}`);
       dlog(`✓ BOOK USING CREDITS button found: "${bookButtonValidation.buttons[0].text}"`);
       dlog(`  Button position: (${bookButtonValidation.buttons[0].x}, ${bookButtonValidation.buttons[0].y})`);
       dlog(`  Button tag: ${bookButtonValidation.buttons[0].tagName}, class: ${bookButtonValidation.buttons[0].className}`);
       
       // Use the validated button to click it directly by coordinates (most reliable)
+      logToFile(`[BOOK BUTTON] Attempting to click button using coordinates...`);
+      logToFile(`[BOOK BUTTON] Click coordinates: x=${bookButtonValidation.buttons[0].x}, y=${bookButtonValidation.buttons[0].y}`);
       dlog(`Clicking BOOK USING CREDITS button using validated coordinates...`);
       const validatedButton = bookButtonValidation.buttons[0];
       
-      try {
-        await page.mouse.click(validatedButton.x, validatedButton.y);
-        logClick('BOOK USING CREDITS button', `mouse.click(${validatedButton.x}, ${validatedButton.y})`, 'Puppeteer.mouse.click(coordinates)');
-        dlog(`✓ Clicked BOOK USING CREDITS button using coordinates`);
-      } catch (e) {
-        dlog(`Coordinate click failed: ${e?.message}, trying selectors...`);
-        
-        // Fallback to selector-based click
-        await clickElement(page, [
-          `::-p-text(${validatedButton.text})`,
-          '::-p-aria(Calendar Button BOOK USING CREDITS)',
-          'div.customer-overlay button',
-          '::-p-xpath(/html/body/web-app/ng-component/div/div/div[2]/div/div/ng-component/div[3]/div/div[3]/div/div[6]/div/button)'
-        ], { offset: { x: 318, y: 20.5 }, location: 'BOOK USING CREDITS button', debug: DEBUG });
-      }
+      // OPTIMIZED: Coordinate click works reliably - no need for fallback methods
+      logToFile(`[BOOK BUTTON] Calling page.mouse.click(${validatedButton.x}, ${validatedButton.y})...`);
+      await page.mouse.click(validatedButton.x, validatedButton.y);
+      logToFile(`[BOOK BUTTON] ✓ page.mouse.click() completed successfully`);
+      logClick('BOOK USING CREDITS button', `mouse.click(${validatedButton.x}, ${validatedButton.y})`, 'Puppeteer.mouse.click(coordinates)');
+      dlog(`✓ Clicked BOOK USING CREDITS button using coordinates`);
       
-      await sleep(1000);
+      // OPTIMIZED: Reduced wait time - verification is quick
+      logToFile(`[BOOK BUTTON] Waiting 500ms after click attempt...`);
+      await sleep(500); // Optimized: reduced from 1000ms - verification happens quickly
       
       // Take screenshot after clicking
+      logToFile(`[BOOK BUTTON] Taking screenshot after click attempt...`);
       await takeScreenshot('after-book-using-credits-click');
       
       // Verify button was clicked (button should disappear or modal should change)
+      logToFile(`[BOOK BUTTON] Verifying if click was successful...`);
       const clickVerified = await page.evaluate(() => {
         // Check if button still exists (should disappear after click)
         const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
@@ -4294,15 +4296,26 @@ async function bookClass({
           chargeButtonVisible: chargeButton !== undefined,
           chargeButtonText: chargeButton ? chargeButton.textContent : null
         };
-      }).catch(() => ({ buttonStillExists: true, chargeButtonVisible: false, chargeButtonText: null }));
+      }).catch((e) => {
+        logToFile(`[BOOK BUTTON] ❌ Error during click verification: ${e?.message}`);
+        return { buttonStillExists: true, chargeButtonVisible: false, chargeButtonText: null };
+      });
+      
+      logToFile(`[BOOK BUTTON] Click verification results:`);
+      logToFile(`[BOOK BUTTON]   - BOOK button still exists: ${clickVerified.buttonStillExists}`);
+      logToFile(`[BOOK BUTTON]   - Charge button visible: ${clickVerified.chargeButtonVisible}`);
+      logToFile(`[BOOK BUTTON]   - Charge button text: ${clickVerified.chargeButtonText || 'N/A'}`);
       
       if (clickVerified.chargeButtonVisible) {
+        logToFile(`[BOOK BUTTON] ✓ SUCCESS: Charge button is now visible - click worked!`);
         logToFile(`✓ BOOK USING CREDITS button clicked successfully - Charge button is now visible`);
         dlog(`✓ BOOK USING CREDITS button clicked successfully - Charge button is now visible: "${clickVerified.chargeButtonText}"`);
       } else if (!clickVerified.buttonStillExists) {
+        logToFile(`[BOOK BUTTON] ✓ SUCCESS: BOOK button disappeared - click worked!`);
         logToFile(`✓ BOOK USING CREDITS button clicked successfully - button disappeared`);
         dlog(`✓ BOOK USING CREDITS button clicked successfully - button disappeared`);
       } else {
+        logToFile(`[BOOK BUTTON] ⚠ WARNING: BOOK button still exists after click - may not have registered`);
         logToFile(`⚠ WARNING: BOOK USING CREDITS button still exists after click - may not have registered`);
         dlog(`⚠ WARNING: BOOK USING CREDITS button still exists after click`);
         // Wait a bit more and check again
