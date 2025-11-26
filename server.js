@@ -769,77 +769,126 @@ async function bookClass({
     await sleep(delay);
   };
   
-  // Use CDP to dispatch realistic mouse events (more human-like than element.click())
-  // This bypasses Puppeteer's high-level click methods which might be detectable
+  // Use native DOM events instead of Puppeteer/CDP - this is the most realistic approach
+  // Directly dispatch browser events in the page context, bypassing all automation detection
   const humanLikeClick = async (page, x, y, options = {}) => {
-    const { delay = 0, button = 'left' } = options;
-    const client = await page.target().createCDPSession();
-    
     try {
-      // Small random offset to simulate imperfect human clicking (humans don't click perfectly still)
+      // Small random offset to simulate imperfect human clicking
       const offsetX = (Math.random() * 2 - 1) * 0.5; // ±0.5px
       const offsetY = (Math.random() * 2 - 1) * 0.5; // ±0.5px
       const finalX = x + offsetX;
       const finalY = y + offsetY;
       
-      // Move mouse to position first (if not already there)
-      await client.send('Input.dispatchMouseEvent', {
-        type: 'mouseMoved',
-        x: finalX,
-        y: finalY,
-        modifiers: 0
-      });
-      
-      // Small delay before mousedown (humans don't click instantly)
-      await sleep(Math.floor(Math.random() * 30) + 10); // 10-40ms
-      
-      // Mouse down
-      await client.send('Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x: finalX,
-        y: finalY,
-        button: button === 'left' ? 0 : (button === 'right' ? 2 : 1),
-        clickCount: 1,
-        modifiers: 0
-      });
-      
-      // Hold time (humans don't release instantly) - random 20-80ms
-      const holdTime = Math.floor(Math.random() * 60) + 20;
-      await sleep(holdTime);
-      
-      // Small movement during click (humans' hands shake slightly)
-      const shakeX = finalX + (Math.random() * 0.3 - 0.15);
-      const shakeY = finalY + (Math.random() * 0.3 - 0.15);
-      
-      // Mouse up
-      await client.send('Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: shakeX,
-        y: shakeY,
-        button: button === 'left' ? 0 : (button === 'right' ? 2 : 1),
-        clickCount: 1,
-        modifiers: 0
-      });
-      
-      // Dispatch the actual click event in the DOM (browsers expect this)
-      await page.evaluate((x, y) => {
+      // Use page.evaluate to dispatch native browser events directly in the DOM
+      // This is the most realistic - it's exactly what a real browser does
+      const clicked = await page.evaluate((x, y) => {
         const element = document.elementFromPoint(x, y);
-        if (element) {
-          const clickEvent = new MouseEvent('click', {
-            view: window,
-            bubbles: true,
-            cancelable: true,
-            clientX: x,
-            clientY: y,
-            button: 0
-          });
-          element.dispatchEvent(clickEvent);
+        if (!element) return false;
+        
+        // Get the element's bounding box for accurate coordinates
+        const rect = element.getBoundingClientRect();
+        const relativeX = x - rect.left;
+        const relativeY = y - rect.top;
+        
+        // Create a realistic sequence of mouse events (exactly like a real browser)
+        // 1. Mouse move
+        const moveEvent = new MouseEvent('mousemove', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          buttons: 0
+        });
+        element.dispatchEvent(moveEvent);
+        
+        // 2. Mouse enter (if element changed)
+        const enterEvent = new MouseEvent('mouseenter', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y
+        });
+        element.dispatchEvent(enterEvent);
+        
+        // 3. Mouse over
+        const overEvent = new MouseEvent('mouseover', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y
+        });
+        element.dispatchEvent(overEvent);
+        
+        // 4. Mouse down
+        const downEvent = new MouseEvent('mousedown', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: 1
+        });
+        element.dispatchEvent(downEvent);
+        
+        // 5. Focus (if element is focusable)
+        if (element.focus && typeof element.focus === 'function') {
+          try {
+            element.focus();
+          } catch (e) {
+            // Ignore focus errors
+          }
         }
+        
+        // 6. Mouse up
+        const upEvent = new MouseEvent('mouseup', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: 0
+        });
+        element.dispatchEvent(upEvent);
+        
+        // 7. Click event (the actual click)
+        const clickEvent = new MouseEvent('click', {
+          view: window,
+          bubbles: true,
+          cancelable: true,
+          clientX: x,
+          clientY: y,
+          button: 0,
+          buttons: 0,
+          detail: 1 // Single click
+        });
+        const result = element.dispatchEvent(clickEvent);
+        
+        // Also try calling click() method directly if it exists (for some elements)
+        if (result && typeof element.click === 'function') {
+          try {
+            element.click();
+          } catch (e) {
+            // Ignore - the event dispatch should be enough
+          }
+        }
+        
+        return result;
       }, finalX, finalY);
       
-      return true;
+      if (clicked) {
+        // Small delay after click to simulate human reaction time
+        await sleep(Math.floor(Math.random() * 30) + 10);
+        return true;
+      }
+      
+      return false;
     } catch (error) {
-      dlog(`CDP mouse click failed: ${error?.message}, falling back to regular click`);
+      dlog(`Native DOM click failed: ${error?.message}, falling back to regular click`);
       // Fallback to regular mouse click
       await page.mouse.move(x, y);
       await page.mouse.click(x, y);
@@ -2898,15 +2947,17 @@ async function bookClass({
           // 1. Simulate human reading/thinking time (longer delay, especially on retries)
           dlog(`  Simulating human reading time before clicking class...`);
           if (attempt === 1) {
-            // First attempt: normal thinking delay
-            await humanThinkingDelay();
+            // First attempt: longer thinking delay to avoid detection
+            const firstAttemptDelay = Math.floor(Math.random() * 5000) + 4000; // 4-9 seconds
+            dlog(`  First attempt thinking delay: ${firstAttemptDelay}ms`);
+            await sleep(firstAttemptDelay);
           } else {
             // Retry attempts: even longer delay (humans take more time when something didn't work)
-            const retryThinkingDelay = Math.floor(Math.random() * 4000) + 3000; // 3-7 seconds
+            const retryThinkingDelay = Math.floor(Math.random() * 6000) + 5000; // 5-11 seconds
             dlog(`  Extended thinking delay for retry: ${retryThinkingDelay}ms`);
             await sleep(retryThinkingDelay);
           }
-          await humanDelay(1500, 3000); // Longer additional random delay
+          await humanDelay(2000, 4000); // Even longer additional random delay
           
           // 2. Simulate mouse movement and page interaction
           await simulateHumanBehavior();
