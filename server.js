@@ -769,8 +769,8 @@ async function bookClass({
     await sleep(delay);
   };
   
-  // Use native DOM events instead of Puppeteer/CDP - this is the most realistic approach
-  // Directly dispatch browser events in the page context, bypassing all automation detection
+  // Use native DOM events AND direct click handler invocation - most realistic approach
+  // This tries multiple methods to ensure the click is registered
   const humanLikeClick = async (page, x, y, options = {}) => {
     try {
       // Small random offset to simulate imperfect human clicking
@@ -779,14 +779,34 @@ async function bookClass({
       const finalX = x + offsetX;
       const finalY = y + offsetY;
       
-      // Use page.evaluate to dispatch native browser events directly in the DOM
+      // Use page.evaluate to dispatch native browser events AND call click handlers directly
       // This is the most realistic - it's exactly what a real browser does
       const clicked = await page.evaluate((x, y) => {
         const element = document.elementFromPoint(x, y);
         if (!element) return false;
         
+        // Walk up the DOM tree to find the actual clickable element (might be a parent)
+        let clickableElement = element;
+        while (clickableElement && clickableElement !== document.body) {
+          // Check if this element or any parent has click handlers
+          const hasClickHandler = clickableElement.onclick || 
+                                  clickableElement.getAttribute('ng-click') ||
+                                  clickableElement.getAttribute('(click)') ||
+                                  clickableElement.getAttribute('@click') ||
+                                  clickableElement.style.cursor === 'pointer' ||
+                                  window.getComputedStyle(clickableElement).cursor === 'pointer';
+          
+          if (hasClickHandler || clickableElement.tagName === 'BUTTON' || clickableElement.tagName === 'A') {
+            break;
+          }
+          clickableElement = clickableElement.parentElement;
+        }
+        
+        // Use the clickable element if found, otherwise use the original
+        const targetElement = clickableElement || element;
+        
         // Get the element's bounding box for accurate coordinates
-        const rect = element.getBoundingClientRect();
+        const rect = targetElement.getBoundingClientRect();
         const relativeX = x - rect.left;
         const relativeY = y - rect.top;
         
@@ -800,9 +820,9 @@ async function bookClass({
           clientY: y,
           buttons: 0
         });
-        element.dispatchEvent(moveEvent);
+        targetElement.dispatchEvent(moveEvent);
         
-        // 2. Mouse enter (if element changed)
+        // 2. Mouse enter
         const enterEvent = new MouseEvent('mouseenter', {
           view: window,
           bubbles: true,
@@ -810,7 +830,7 @@ async function bookClass({
           clientX: x,
           clientY: y
         });
-        element.dispatchEvent(enterEvent);
+        targetElement.dispatchEvent(enterEvent);
         
         // 3. Mouse over
         const overEvent = new MouseEvent('mouseover', {
@@ -820,7 +840,7 @@ async function bookClass({
           clientX: x,
           clientY: y
         });
-        element.dispatchEvent(overEvent);
+        targetElement.dispatchEvent(overEvent);
         
         // 4. Mouse down
         const downEvent = new MouseEvent('mousedown', {
@@ -832,12 +852,12 @@ async function bookClass({
           button: 0,
           buttons: 1
         });
-        element.dispatchEvent(downEvent);
+        targetElement.dispatchEvent(downEvent);
         
         // 5. Focus (if element is focusable)
-        if (element.focus && typeof element.focus === 'function') {
+        if (targetElement.focus && typeof targetElement.focus === 'function') {
           try {
-            element.focus();
+            targetElement.focus();
           } catch (e) {
             // Ignore focus errors
           }
@@ -853,9 +873,9 @@ async function bookClass({
           button: 0,
           buttons: 0
         });
-        element.dispatchEvent(upEvent);
+        targetElement.dispatchEvent(upEvent);
         
-        // 7. Click event (the actual click)
+        // 7. Click event (the actual click) - dispatch on both element and target
         const clickEvent = new MouseEvent('click', {
           view: window,
           bubbles: true,
@@ -866,14 +886,34 @@ async function bookClass({
           buttons: 0,
           detail: 1 // Single click
         });
-        const result = element.dispatchEvent(clickEvent);
         
-        // Also try calling click() method directly if it exists (for some elements)
-        if (result && typeof element.click === 'function') {
+        // Dispatch on the original element first (where the click happened)
+        let result = element.dispatchEvent(clickEvent);
+        
+        // Also dispatch on the clickable element if different
+        if (targetElement !== element) {
+          result = targetElement.dispatchEvent(clickEvent) || result;
+        }
+        
+        // 8. Try calling click() method directly on the clickable element
+        // This is what the website's JavaScript expects
+        if (typeof targetElement.click === 'function') {
           try {
-            element.click();
+            // Call the native click method - this triggers all event handlers
+            targetElement.click();
+            result = true;
           } catch (e) {
             // Ignore - the event dispatch should be enough
+          }
+        }
+        
+        // 9. Also try calling click on the original element if it's different
+        if (element !== targetElement && typeof element.click === 'function') {
+          try {
+            element.click();
+            result = true;
+          } catch (e) {
+            // Ignore
           }
         }
         
@@ -3097,14 +3137,14 @@ async function bookClass({
                     // Add a small random delay before clicking (humans don't click instantly after hovering)
                     await humanDelay(200, 500);
                     
-                    dlog(`  Clicking div.title using CDP mouse events with offset (170, 15) - more human-like`);
+                      dlog(`  Clicking div.title using native DOM events with offset (170, 15) - more human-like`);
                     const titleBox = await titleLocator.boundingBox();
                     if (titleBox) {
                       const clickX = titleBox.x + 170;
                       const clickY = titleBox.y + 15;
                       await humanLikeClick(page, clickX, clickY);
                       clicked = true;
-                      dlog(`  ✓ Clicked using CDP mouse events with offset - bypasses automation detection`);
+                      dlog(`  ✓ Clicked using native DOM events with offset - bypasses automation detection`);
                     } else {
                       // Fallback to Locator API if bounding box not available
                       await titleLocator.click({ 
@@ -3128,10 +3168,10 @@ async function bookClass({
                           // Use CDP mouse events for more realistic clicking
                           await humanLikeClick(page, clickX, clickY);
                           clicked = true;
-                          dlog(`  ✓ Clicked using CDP mouse events with offset (fallback)`);
+                          dlog(`  ✓ Clicked using native DOM events with offset (fallback)`);
                         }
                       } catch (e) {
-                        dlog(`  CDP click failed: ${e?.message}, trying element.click()...`);
+                        dlog(`  Native DOM click failed: ${e?.message}, trying element.click()...`);
                         // Final fallback to element.click()
                         try {
                           await titleElement.click({ offset: { x: 170, y: 15 } });
@@ -3151,7 +3191,7 @@ async function bookClass({
                           const clickY = classBox.y + 15;
                           await humanLikeClick(page, clickX, clickY);
                           clicked = true;
-                          dlog(`  ✓ Clicked class element using CDP mouse events`);
+                          dlog(`  ✓ Clicked class element using native DOM events`);
                         } else {
                           // Final fallback
                           await classElement.click();
@@ -3198,7 +3238,7 @@ async function bookClass({
                       // Use CDP mouse events for more realistic clicking
                       await humanLikeClick(page, clickX, clickY);
                       clicked = true;
-                      dlog(`  ✓ Clicked using CDP mouse events with recorded offset (selector fallback)`);
+                      dlog(`  ✓ Clicked using native DOM events with recorded offset (selector fallback)`);
                     }
                   }
                   
@@ -3211,7 +3251,7 @@ async function bookClass({
                       // Use CDP mouse events for more realistic clicking
                       await humanLikeClick(page, clickX, clickY);
                       clicked = true;
-                      dlog(`  ✓ Clicked using CDP mouse events (selector fallback, original method)`);
+                      dlog(`  ✓ Clicked using native DOM events (selector fallback, original method)`);
                     } else {
                       await element.click();
                       clicked = true;
