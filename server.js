@@ -769,6 +769,84 @@ async function bookClass({
     await sleep(delay);
   };
   
+  // Use CDP to dispatch realistic mouse events (more human-like than element.click())
+  // This bypasses Puppeteer's high-level click methods which might be detectable
+  const humanLikeClick = async (page, x, y, options = {}) => {
+    const { delay = 0, button = 'left' } = options;
+    const client = await page.target().createCDPSession();
+    
+    try {
+      // Small random offset to simulate imperfect human clicking (humans don't click perfectly still)
+      const offsetX = (Math.random() * 2 - 1) * 0.5; // ±0.5px
+      const offsetY = (Math.random() * 2 - 1) * 0.5; // ±0.5px
+      const finalX = x + offsetX;
+      const finalY = y + offsetY;
+      
+      // Move mouse to position first (if not already there)
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseMoved',
+        x: finalX,
+        y: finalY,
+        modifiers: 0
+      });
+      
+      // Small delay before mousedown (humans don't click instantly)
+      await sleep(Math.floor(Math.random() * 30) + 10); // 10-40ms
+      
+      // Mouse down
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mousePressed',
+        x: finalX,
+        y: finalY,
+        button: button === 'left' ? 0 : (button === 'right' ? 2 : 1),
+        clickCount: 1,
+        modifiers: 0
+      });
+      
+      // Hold time (humans don't release instantly) - random 20-80ms
+      const holdTime = Math.floor(Math.random() * 60) + 20;
+      await sleep(holdTime);
+      
+      // Small movement during click (humans' hands shake slightly)
+      const shakeX = finalX + (Math.random() * 0.3 - 0.15);
+      const shakeY = finalY + (Math.random() * 0.3 - 0.15);
+      
+      // Mouse up
+      await client.send('Input.dispatchMouseEvent', {
+        type: 'mouseReleased',
+        x: shakeX,
+        y: shakeY,
+        button: button === 'left' ? 0 : (button === 'right' ? 2 : 1),
+        clickCount: 1,
+        modifiers: 0
+      });
+      
+      // Dispatch the actual click event in the DOM (browsers expect this)
+      await page.evaluate((x, y) => {
+        const element = document.elementFromPoint(x, y);
+        if (element) {
+          const clickEvent = new MouseEvent('click', {
+            view: window,
+            bubbles: true,
+            cancelable: true,
+            clientX: x,
+            clientY: y,
+            button: 0
+          });
+          element.dispatchEvent(clickEvent);
+        }
+      }, finalX, finalY);
+      
+      return true;
+    } catch (error) {
+      dlog(`CDP mouse click failed: ${error?.message}, falling back to regular click`);
+      // Fallback to regular mouse click
+      await page.mouse.move(x, y);
+      await page.mouse.click(x, y);
+      return false;
+    }
+  };
+  
   // Override permissions (for both domains)
   const context = browser.defaultBrowserContext();
   await context.overridePermissions('https://partners.gokenko.com', [
@@ -2801,6 +2879,12 @@ async function bookClass({
             // Wait for calendar to be visible again
             await sleep(1000);
             
+            // CRITICAL: Add longer delay between retries to avoid rate limiting/detection
+            // The website might be detecting rapid retries, so we need to wait longer
+            const retryDelay = Math.floor(Math.random() * 3000) + 2000; // 2-5 seconds
+            dlog(`  Waiting ${retryDelay}ms before retry to avoid detection...`);
+            await sleep(retryDelay);
+            
             // Take screenshot before retry
             await takeScreenshot(`before-class-click-retry-${attempt}`);
           }
@@ -2811,10 +2895,18 @@ async function bookClass({
           // CRITICAL: Add extensive human-like behavior before clicking to prevent automation detection
           // The website detects automation, so we need to be very realistic
           
-          // 1. Simulate human reading/thinking time (longer delay)
+          // 1. Simulate human reading/thinking time (longer delay, especially on retries)
           dlog(`  Simulating human reading time before clicking class...`);
-          await humanThinkingDelay();
-          await humanDelay(1000, 2000); // Additional random delay
+          if (attempt === 1) {
+            // First attempt: normal thinking delay
+            await humanThinkingDelay();
+          } else {
+            // Retry attempts: even longer delay (humans take more time when something didn't work)
+            const retryThinkingDelay = Math.floor(Math.random() * 4000) + 3000; // 3-7 seconds
+            dlog(`  Extended thinking delay for retry: ${retryThinkingDelay}ms`);
+            await sleep(retryThinkingDelay);
+          }
+          await humanDelay(1500, 3000); // Longer additional random delay
           
           // 2. Simulate mouse movement and page interaction
           await simulateHumanBehavior();
@@ -2949,55 +3041,74 @@ async function bookClass({
                       dlog(`  Hover failed, continuing with click: ${hoverError?.message}`);
                     }
                     
-                    // Use the Locator API's .click() method with offset (like real web session)
-                    // This is what the user's code does: .click({ offset: { x: 170, y: 15 } })
+                    // Use CDP-based human-like click instead of Locator API click
+                    // This bypasses high-level Puppeteer methods which might be detectable
                     // Add a small random delay before clicking (humans don't click instantly after hovering)
                     await humanDelay(200, 500);
                     
-                    dlog(`  Clicking div.title using Locator API with offset (170, 15) - like real web session`);
-                    await titleLocator.click({ 
-                      offset: { x: 170, y: 15 },
-                      delay: Math.floor(Math.random() * 50) + 20 // Random delay between mousedown and mouseup (20-70ms) - more human-like
-                    });
-                    clicked = true;
-                    dlog(`  ✓ Clicked using Locator API .click() with offset - matches recorded pattern`);
+                    dlog(`  Clicking div.title using CDP mouse events with offset (170, 15) - more human-like`);
+                    const titleBox = await titleLocator.boundingBox();
+                    if (titleBox) {
+                      const clickX = titleBox.x + 170;
+                      const clickY = titleBox.y + 15;
+                      await humanLikeClick(page, clickX, clickY);
+                      clicked = true;
+                      dlog(`  ✓ Clicked using CDP mouse events with offset - bypasses automation detection`);
+                    } else {
+                      // Fallback to Locator API if bounding box not available
+                      await titleLocator.click({ 
+                        offset: { x: 170, y: 15 },
+                        delay: Math.floor(Math.random() * 50) + 20
+                      });
+                      clicked = true;
+                      dlog(`  ✓ Clicked using Locator API .click() with offset - fallback method`);
+                    }
                   } catch (locatorError) {
                     dlog(`  Locator API failed: ${locatorError?.message}, trying fallback...`);
                     
-                    // Fallback: Use traditional method but still try to find div.title
+                    // Fallback: Use CDP-based human-like click instead of element.click()
                     const titleElement = await classElement.$('div.title');
                     if (titleElement) {
-                      // Use element.click() with offset if supported, otherwise use mouse.click
                       try {
-                        // Try using the element's click method with offset (more like real session)
-                        await titleElement.click({ offset: { x: 170, y: 15 } });
-                        clicked = true;
-                        dlog(`  ✓ Clicked using element.click() with offset`);
-                      } catch (e) {
-                        // Fallback to mouse.click with calculated coordinates
                         const titleBox = await titleElement.boundingBox();
                         if (titleBox) {
                           const clickX = titleBox.x + 170;
                           const clickY = titleBox.y + 15;
-                          await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                          await humanDelay(100, 300);
-                          await page.mouse.click(clickX, clickY);
+                          // Use CDP mouse events for more realistic clicking
+                          await humanLikeClick(page, clickX, clickY);
                           clicked = true;
-                          dlog(`  ✓ Clicked using mouse.click() with calculated coordinates`);
+                          dlog(`  ✓ Clicked using CDP mouse events with offset (fallback)`);
+                        }
+                      } catch (e) {
+                        dlog(`  CDP click failed: ${e?.message}, trying element.click()...`);
+                        // Final fallback to element.click()
+                        try {
+                          await titleElement.click({ offset: { x: 170, y: 15 } });
+                          clicked = true;
+                          dlog(`  ✓ Clicked using element.click() with offset (final fallback)`);
+                        } catch (e2) {
+                          dlog(`  element.click() also failed: ${e2?.message}`);
                         }
                       }
                     } else {
                       // No div.title found, try clicking the class element itself with offset
                       dlog(`  div.title not found, clicking class element directly with offset...`);
                       try {
-                        await classElement.click({ offset: { x: 170, y: 15 } });
-                        clicked = true;
-                        dlog(`  ✓ Clicked class element using .click() with offset`);
+                        const classBox = await classElement.boundingBox();
+                        if (classBox) {
+                          const clickX = classBox.x + 170;
+                          const clickY = classBox.y + 15;
+                          await humanLikeClick(page, clickX, clickY);
+                          clicked = true;
+                          dlog(`  ✓ Clicked class element using CDP mouse events`);
+                        } else {
+                          // Final fallback
+                          await classElement.click();
+                          clicked = true;
+                          dlog(`  ✓ Clicked class element directly (final fallback)`);
+                        }
                       } catch (e) {
-                        // Final fallback
-                        await classElement.click();
-                        clicked = true;
-                        dlog(`  ✓ Clicked class element directly`);
+                        dlog(`  All click methods failed: ${e?.message}`);
                       }
                     }
                   }
@@ -3026,18 +3137,17 @@ async function bookClass({
                   // Human-like delay after scrolling
                   await humanDelay(300, 600);
                   
-                  // Try to find div.title within the element and click with recorded offset
+                  // Try to find div.title within the element and click with recorded offset using CDP
                   const titleElement = await element.$('div.title');
                   if (titleElement) {
                     const box = await titleElement.boundingBox();
                     if (box) {
                       const clickX = box.x + 170;
                       const clickY = box.y + 15;
-                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                      await humanDelay(100, 300);
-                      await page.mouse.click(clickX, clickY);
+                      // Use CDP mouse events for more realistic clicking
+                      await humanLikeClick(page, clickX, clickY);
                       clicked = true;
-                      dlog(`  ✓ Clicked using selector fallback with recorded offset`);
+                      dlog(`  ✓ Clicked using CDP mouse events with recorded offset (selector fallback)`);
                     }
                   }
                   
@@ -3047,14 +3157,14 @@ async function bookClass({
                     if (box) {
                       const clickX = box.x + box.width * 0.12;
                       const clickY = box.y + box.height / 2;
-                      await page.mouse.move(clickX, clickY, { steps: Math.floor(Math.random() * 5) + 3 });
-                      await humanDelay(100, 300);
-                      await page.mouse.click(clickX, clickY);
+                      // Use CDP mouse events for more realistic clicking
+                      await humanLikeClick(page, clickX, clickY);
                       clicked = true;
-                      dlog(`  ✓ Clicked using selector fallback (original method)`);
+                      dlog(`  ✓ Clicked using CDP mouse events (selector fallback, original method)`);
                     } else {
                       await element.click();
                       clicked = true;
+                      dlog(`  ✓ Clicked using element.click() (no bounding box, final fallback)`);
                     }
                   }
                 }
