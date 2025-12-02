@@ -3142,133 +3142,95 @@ async function bookClass({
           
           let clicked = false;
           
-          // Method 1: Use Puppeteer Locator API with .click() and offset (matching user's recorded pattern)
-          // This is more like a real web session - uses element's click method with offset
-          // Key from user's code: locator.click({ offset: { x: 170, y: 15 } })
+          // Method 1: Simplified approach - click the class element directly
+          // First try to find and click div.title if it exists, otherwise click the class element itself
           if (classInfo.selector) {
             try {
               dlog(`  Finding class element by time using selector: ${classInfo.selector}`);
-              await page.waitForSelector(classInfo.selector, { visible: true, timeout: 3000 });
+              await page.waitForSelector(classInfo.selector, { visible: true, timeout: 5000 });
               
-              // Get the class element using Locator API
+              // Get the class element
               const classElement = await page.$(classInfo.selector);
               
               if (classElement) {
                 const isVisible = await classElement.isVisible().catch(() => false);
                 if (isVisible) {
-                  dlog(`  Found class element for ${targetTime}, finding div.title within it...`);
+                  dlog(`  Found class element for ${targetTime}, attempting to click...`);
                   
-                  // Use Locator API to find div.title within the class element
-                  // This matches the user's pattern: locator('div.title').click({ offset: { x: 170, y: 15 } })
-                  try {
-                    // Create a locator for div.title within the class element
-                    // We need to scope it to the class element
-                    const classLocator = page.locator(classInfo.selector);
-                    const titleLocator = classLocator.locator('div.title').first();
+                  // Get bounding box for the class element
+                  const classBox = await classElement.boundingBox();
+                  if (!classBox) {
+                    dlog(`  ⚠ Could not get bounding box for class element`);
+                    throw new Error('No bounding box');
+                  }
+                  
+                  // Try to find div.title within the class element first
+                  const titleElement = await classElement.$('div.title');
+                  let clickTarget = titleElement;
+                  let clickOffset = { x: 170, y: 15 }; // Default offset for div.title
+                  
+                  if (!titleElement) {
+                    dlog(`  div.title not found, will click class element directly`);
+                    clickTarget = classElement;
+                    // Click at left side of class element (12% from left) to avoid delete buttons
+                    clickOffset = { x: classBox.width * 0.12, y: classBox.height / 2 };
+                  } else {
+                    dlog(`  Found div.title within class element`);
+                  }
+                  
+                  // Hover over the element first (human behavior)
+                  const targetBox = clickTarget === titleElement 
+                    ? await titleElement.boundingBox() 
+                    : classBox;
+                  
+                  if (targetBox) {
+                    const hoverX = targetBox.x + clickOffset.x;
+                    const hoverY = targetBox.y + clickOffset.y;
                     
-                    // Wait for the title element to be available and fully interactive
-                    await titleLocator.waitFor({ timeout: 3000, state: 'visible' });
+                    dlog(`  Moving mouse to element and hovering...`);
+                    await page.mouse.move(hoverX, hoverY, { steps: Math.floor(Math.random() * 10) + 8 });
+                    await humanDelay(400, 800);
                     
-                    // Additional wait to ensure element is fully loaded and interactive
-                    await humanDelay(300, 600);
-                    
-                    // Get bounding box to hover first (humans hover before clicking)
-                    try {
-                      const titleBox = await titleLocator.boundingBox();
-                      if (titleBox) {
-                        const hoverX = titleBox.x + 170;
-                        const hoverY = titleBox.y + 15;
-                        
-                        // Move mouse to the click position first (hover)
-                        dlog(`  Moving mouse to element and hovering (human-like behavior)...`);
-                        await page.mouse.move(hoverX, hoverY, { steps: Math.floor(Math.random() * 10) + 8 });
-                        await humanDelay(400, 800); // Hover for realistic time
-                        
-                        // Small micro-movements while hovering (humans don't hold perfectly still)
-                        for (let i = 0; i < Math.floor(Math.random() * 2) + 1; i++) {
-                          const microX = hoverX + (Math.random() * 10 - 5);
-                          const microY = hoverY + (Math.random() * 10 - 5);
-                          await page.mouse.move(microX, microY, { steps: 2 });
-                          await sleep(Math.random() * 150 + 50);
-                        }
-                        
-                        // Move back to exact position
-                        await page.mouse.move(hoverX, hoverY, { steps: 2 });
-                        await humanDelay(200, 400);
-                      }
-                    } catch (hoverError) {
-                      dlog(`  Hover failed, continuing with click: ${hoverError?.message}`);
+                    // Small micro-movements while hovering
+                    for (let i = 0; i < 2; i++) {
+                      const microX = hoverX + (Math.random() * 10 - 5);
+                      const microY = hoverY + (Math.random() * 10 - 5);
+                      await page.mouse.move(microX, microY, { steps: 2 });
+                      await sleep(Math.random() * 150 + 50);
                     }
                     
-                    // Use CDP-based human-like click instead of Locator API click
-                    // This bypasses high-level Puppeteer methods which might be detectable
-                    // Add a small random delay before clicking (humans don't click instantly after hovering)
-                    await humanDelay(200, 500);
+                    // Move back to exact position
+                    await page.mouse.move(hoverX, hoverY, { steps: 2 });
+                    await humanDelay(200, 400);
                     
-                      dlog(`  Clicking div.title using native DOM events with offset (170, 15) - more human-like`);
-                    const titleBox = await titleLocator.boundingBox();
-                    if (titleBox) {
-                      const clickX = titleBox.x + 170;
-                      const clickY = titleBox.y + 15;
-                      await humanLikeClick(page, clickX, clickY);
-                      clicked = true;
-                      dlog(`  ✓ Clicked using native DOM events with offset - bypasses automation detection`);
-                    } else {
-                      // Fallback to Locator API if bounding box not available
-                      await titleLocator.click({ 
-                        offset: { x: 170, y: 15 },
-                        delay: Math.floor(Math.random() * 50) + 20
+                    // Now click using human-like click
+                    dlog(`  Clicking class element at (${hoverX.toFixed(0)}, ${hoverY.toFixed(0)})...`);
+                    await humanLikeClick(page, hoverX, hoverY);
+                    clicked = true;
+                    dlog(`  ✓ Clicked class element using native DOM events`);
+                    
+                    // Verify click worked by checking if something changed on the page
+                    await sleep(1000);
+                    const clickVerified = await page.evaluate(() => {
+                      // Check if a modal or dialog appeared
+                      const modals = document.querySelectorAll('[class*="modal"], [class*="dialog"], [class*="overlay"]');
+                      const hasModal = Array.from(modals).some(m => {
+                        const style = window.getComputedStyle(m);
+                        return style.display !== 'none' && style.visibility !== 'hidden' && m.offsetParent !== null;
                       });
-                      clicked = true;
-                      dlog(`  ✓ Clicked using Locator API .click() with offset - fallback method`);
-                    }
-                  } catch (locatorError) {
-                    dlog(`  Locator API failed: ${locatorError?.message}, trying fallback...`);
+                      
+                      // Check if body text changed (indicating a modal opened)
+                      const bodyText = (document.body.textContent || '').toLowerCase();
+                      const hasBookingContent = bodyText.includes('book') || bodyText.includes('customer') || 
+                                               bodyText.includes('delete') || bodyText.includes('class');
+                      
+                      return { hasModal, hasBookingContent, modalCount: modals.length };
+                    });
                     
-                    // Fallback: Use CDP-based human-like click instead of element.click()
-                    const titleElement = await classElement.$('div.title');
-                    if (titleElement) {
-                      try {
-                        const titleBox = await titleElement.boundingBox();
-                        if (titleBox) {
-                          const clickX = titleBox.x + 170;
-                          const clickY = titleBox.y + 15;
-                          // Use CDP mouse events for more realistic clicking
-                          await humanLikeClick(page, clickX, clickY);
-                          clicked = true;
-                          dlog(`  ✓ Clicked using native DOM events with offset (fallback)`);
-                        }
-                      } catch (e) {
-                        dlog(`  Native DOM click failed: ${e?.message}, trying element.click()...`);
-                        // Final fallback to element.click()
-                        try {
-                          await titleElement.click({ offset: { x: 170, y: 15 } });
-                          clicked = true;
-                          dlog(`  ✓ Clicked using element.click() with offset (final fallback)`);
-                        } catch (e2) {
-                          dlog(`  element.click() also failed: ${e2?.message}`);
-                        }
-                      }
+                    if (clickVerified.hasModal || clickVerified.hasBookingContent) {
+                      dlog(`  ✓ Click verified - modal or booking content appeared (modals: ${clickVerified.modalCount})`);
                     } else {
-                      // No div.title found, try clicking the class element itself with offset
-                      dlog(`  div.title not found, clicking class element directly with offset...`);
-                      try {
-                        const classBox = await classElement.boundingBox();
-                        if (classBox) {
-                          const clickX = classBox.x + 170;
-                          const clickY = classBox.y + 15;
-                          await humanLikeClick(page, clickX, clickY);
-                          clicked = true;
-                          dlog(`  ✓ Clicked class element using native DOM events`);
-                        } else {
-                          // Final fallback
-                          await classElement.click();
-                          clicked = true;
-                          dlog(`  ✓ Clicked class element directly (final fallback)`);
-                        }
-                      } catch (e) {
-                        dlog(`  All click methods failed: ${e?.message}`);
-                      }
+                      dlog(`  ⚠ Click may not have worked - no modal or booking content detected`);
                     }
                   }
                 } else {
@@ -3472,10 +3434,36 @@ async function bookClass({
           
           if (!clicked) {
             dlog(`  ✗ Could not click the element using any method`);
+            logToFile(`✗ Failed to click class element on attempt ${attempt}/${MAX_CLASS_CLICK_RETRIES}`);
+            
+            // Log what elements are actually visible for debugging
+            const visibleElements = await page.evaluate(() => {
+              const events = document.querySelectorAll('mwl-calendar-week-view-event, div[class*="cal-event"], div[class*="calendar-event"]');
+              const visible = [];
+              for (const event of events) {
+                if (event.offsetParent !== null) {
+                  const text = (event.textContent || '').substring(0, 100);
+                  const rect = event.getBoundingClientRect();
+                  visible.push({
+                    text: text,
+                    position: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                    tag: event.tagName,
+                    classes: event.className
+                  });
+                }
+              }
+              return visible;
+            }).catch(() => []);
+            
+            dlog(`  Visible class elements on page: ${visibleElements.length}`);
+            if (visibleElements.length > 0) {
+              dlog(`  First visible element: "${visibleElements[0].text}" at (${visibleElements[0].position.x}, ${visibleElements[0].position.y})`);
+            }
+            
             if (attempt < MAX_CLASS_CLICK_RETRIES) {
               continue; // Retry
             } else {
-              throw new Error(`Could not click class element after ${MAX_CLASS_CLICK_RETRIES} attempts`);
+              throw new Error(`Could not click class element after ${MAX_CLASS_CLICK_RETRIES} attempts. Found ${visibleElements.length} visible class elements.`);
             }
           }
           
@@ -3484,6 +3472,49 @@ async function bookClass({
           
           // Take screenshot immediately after clicking class to see what appeared
           await takeScreenshot(`after-class-click${attempt > 1 ? `-retry-${attempt}` : ''}`);
+          
+          // Verify that clicking the class actually did something
+          if (clicked) {
+            const clickResult = await page.evaluate(() => {
+              // Check if any modal/dialog appeared
+              const modals = document.querySelectorAll('[class*="modal"], [class*="dialog"], [class*="overlay"], [class*="popup"]');
+              const visibleModals = Array.from(modals).filter(m => {
+                const style = window.getComputedStyle(m);
+                return style.display !== 'none' && style.visibility !== 'hidden' && m.offsetParent !== null;
+              });
+              
+              // Check body text for booking-related content
+              const bodyText = (document.body.textContent || '').toLowerCase();
+              const hasBookingContent = bodyText.includes('book') || bodyText.includes('customer') || 
+                                       bodyText.includes('delete') || bodyText.includes('class instance');
+              
+              // Check for buttons that indicate a modal opened
+              const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+              const hasModalButtons = buttons.some(btn => {
+                if (btn.offsetParent === null) return false;
+                const text = (btn.textContent || '').toLowerCase();
+                return text.includes('book customer') || text.includes('go back') || 
+                       text.includes('delete') || text.includes('cancel');
+              });
+              
+              return {
+                modalCount: visibleModals.length,
+                hasBookingContent,
+                hasModalButtons,
+                bodyTextPreview: bodyText.substring(0, 200)
+              };
+            }).catch(() => ({ modalCount: 0, hasBookingContent: false, hasModalButtons: false, bodyTextPreview: '' }));
+            
+            if (clickResult.modalCount > 0 || clickResult.hasBookingContent || clickResult.hasModalButtons) {
+              dlog(`✓ Click verified - modal/dialog appeared (${clickResult.modalCount} modals, hasBookingContent: ${clickResult.hasBookingContent}, hasModalButtons: ${clickResult.hasModalButtons})`);
+              logToFile(`✓ Class click successful - modal/dialog detected`);
+            } else {
+              dlog(`⚠ Click may not have worked - no modal or booking content detected after click`);
+              dlog(`  Body text preview: ${clickResult.bodyTextPreview.substring(0, 100)}...`);
+              logToFile(`⚠ WARNING: Class click may have failed - no modal detected`);
+              // Don't fail immediately, continue and see if Book Customer button appears
+            }
+          }
           
           // The delete modal ALWAYS appears when clicking a class - we need to dismiss it
           dlog(`Checking for delete modal (expected to appear)...`);
