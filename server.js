@@ -2263,8 +2263,19 @@ async function bookClass({
           }
         }
         
-        console.log(`[BROWSER] Target date ${targetDay} not found in calendar`);
-        return { success: false, reason: 'date_not_visible' };
+        // Log what dates are actually visible for debugging
+        const visibleDates = [];
+        const allSpans = document.querySelectorAll('bs-days-calendar-view table td span, [class*="datepicker"] table td span, tr td span');
+        for (const span of allSpans) {
+          if (span.offsetParent !== null) {
+            const text = span.textContent?.trim();
+            if (text && /^\d+$/.test(text)) {
+              visibleDates.push(text);
+            }
+          }
+        }
+        console.log(`[BROWSER] Target date ${targetDay} not found in calendar. Visible dates: ${visibleDates.join(', ')}`);
+        return { success: false, reason: 'date_not_visible', visibleDates: visibleDates };
       }, day, month, year).catch(() => ({ success: false, reason: 'error' }));
       
       if (!datePicked.success) {
@@ -2321,16 +2332,18 @@ async function bookClass({
                     }
                   }
                   
-                  // If context check failed but we're in November area (target is Nov), try clicking anyway
+                  // If context check failed but we're in the target month area, try clicking anyway
                   // This handles cases where month/year detection isn't perfect
-                  if (targetMonth === 11) {
-                    const calendarText = document.querySelector('bs-days-calendar-view, bs-calendar-layout')?.textContent || '';
-                    if (calendarText.includes('November') || calendarText.includes('Nov')) {
-                      console.log(`[BROWSER] Found day ${targetDay} in November context (current month), clicking...`);
-                      span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                      span.click();
-                      return { success: true, method: 'direct_november' };
-                    }
+                  const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+                  const monthAbbrevs = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                  const targetMonthName = monthNames[targetMonth - 1];
+                  const targetMonthAbbrev = monthAbbrevs[targetMonth - 1];
+                  const calendarText = document.querySelector('bs-days-calendar-view, bs-calendar-layout')?.textContent || '';
+                  if (calendarText.includes(targetMonthName) || calendarText.includes(targetMonthAbbrev)) {
+                    console.log(`[BROWSER] Found day ${targetDay} in ${targetMonthName} context (current month), clicking...`);
+                    span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    span.click();
+                    return { success: true, method: `direct_${targetMonthName.toLowerCase()}` };
                   }
                 }
               }
@@ -2507,8 +2520,19 @@ async function bookClass({
                 }
               }
               
-              console.log(`[BROWSER] Could not find day ${targetDay} in date picker`);
-              return { success: false, reason: 'day_not_found' };
+              // Log what dates are actually visible for debugging
+              const visibleDates = [];
+              const allSpans = document.querySelectorAll('bs-days-calendar-view table td span, bs-calendar-layout table td span, [class*="datepicker"] table td span, tr td span');
+              for (const span of allSpans) {
+                if (span.offsetParent !== null) {
+                  const text = span.textContent?.trim();
+                  if (text && /^\d+$/.test(text)) {
+                    visibleDates.push(text);
+                  }
+                }
+              }
+              console.log(`[BROWSER] Could not find day ${targetDay} in date picker. Visible dates: ${visibleDates.join(', ')}`);
+              return { success: false, reason: 'day_not_found', visibleDates: visibleDates };
             }, day).catch(() => ({ success: false, reason: 'error' }));
             
             if (dayClicked.success) {
@@ -2568,30 +2592,73 @@ async function bookClass({
                                  (currentDatePickerState.year * 12 + currentDatePickerState.month) < (year * 12 + month);
             
             if (needsForward) {
-              dlog(`Navigating date picker forward...`);
-              await clickElement(page, [
+              dlog(`Navigating date picker forward (from ${currentDatePickerState?.month || '?'}/${currentDatePickerState?.year || '?'} to ${month}/${year})...`);
+              const nextClicked = await clickElement(page, [
                 'bs-datepicker-container button[aria-label*="next"]',
+                'bs-datepicker-container button[aria-label*="Next"]',
                 'bs-datepicker-container button.next',
+                'bs-datepicker-container .next',
                 '[class*="datepicker"] button[aria-label*="next"]',
-                '::-p-xpath(//bs-datepicker-container//button[@aria-label[contains(., "next")]])'
+                '[class*="datepicker"] button[aria-label*="Next"]',
+                'button[title*="next"]',
+                'button[title*="Next"]',
+                '::-p-xpath(//bs-datepicker-container//button[@aria-label[contains(., "next")]])',
+                '::-p-xpath(//button[contains(@aria-label, "next") or contains(@aria-label, "Next")])'
               ], { timeout: 2000, debug: DEBUG }).catch(() => {
                 dlog(`Could not find next button in date picker`);
+                return false;
               });
+              if (!nextClicked) {
+                dlog(`⚠ Next button not found or not clickable - trying alternative navigation methods`);
+                // Try clicking on month/year header to open month picker
+                await page.evaluate(() => {
+                  const header = document.querySelector('bs-datepicker-container .current, bs-datepicker-container button.current, [class*="datepicker"] .current');
+                  if (header && header.offsetParent !== null) {
+                    header.click();
+                    return true;
+                  }
+                  return false;
+                }).catch(() => false);
+              }
             } else {
-              dlog(`Navigating date picker backward...`);
-              await clickElement(page, [
+              dlog(`Navigating date picker backward (from ${currentDatePickerState?.month || '?'}/${currentDatePickerState?.year || '?'} to ${month}/${year})...`);
+              const prevClicked = await clickElement(page, [
                 'bs-datepicker-container button[aria-label*="previous"]',
+                'bs-datepicker-container button[aria-label*="Previous"]',
                 'bs-datepicker-container button.previous',
-                '[class*="datepicker"] button[aria-label*="previous"]'
+                'bs-datepicker-container .previous',
+                '[class*="datepicker"] button[aria-label*="previous"]',
+                '[class*="datepicker"] button[aria-label*="Previous"]',
+                'button[title*="previous"]',
+                'button[title*="Previous"]'
               ], { timeout: 2000, debug: DEBUG }).catch(() => {
                 dlog(`Could not find previous button in date picker`);
+                return false;
               });
+              if (!prevClicked) {
+                dlog(`⚠ Previous button not found or not clickable - trying alternative navigation methods`);
+                // Try clicking on month/year header to open month picker
+                await page.evaluate(() => {
+                  const header = document.querySelector('bs-datepicker-container .current, bs-datepicker-container button.current, [class*="datepicker"] .current');
+                  if (header && header.offsetParent !== null) {
+                    header.click();
+                    return true;
+                  }
+                  return false;
+                }).catch(() => false);
+              }
             }
-            await sleep(1000);
+            await sleep(1500); // Increased wait time for calendar to update
           }
           
           if (navAttempt >= 11) {
-            dlog(`✗ Could not navigate to target date in date picker after ${navAttempt + 1} attempts`);
+            const finalState = await page.evaluate(() => {
+              const view = document.querySelector('bs-days-calendar-view, bs-calendar-layout, [class*="datepicker"]');
+              return view ? view.textContent : 'unknown';
+            }).catch(() => 'error reading state');
+            dlog(`✗ Could not navigate to target date ${day}/${month}/${year} in date picker after ${navAttempt + 1} attempts`);
+            dlog(`  Final calendar state: ${finalState}`);
+            logToFile(`✗ Date navigation failed: Could not reach ${day}/${month}/${year} after ${navAttempt + 1} attempts. Final state: ${finalState}`);
             break;
           }
           }
