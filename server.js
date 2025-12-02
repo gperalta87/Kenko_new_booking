@@ -1,4 +1,5 @@
 // server.js — CRM Booking Scraper API (Express + Puppeteer)
+// Deployed on Railway
 
 console.log("🚀 Starting server initialization...");
 
