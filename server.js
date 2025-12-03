@@ -2817,16 +2817,18 @@ async function bookClass({
             console.log(`[BROWSER] Event time: ${eventHour24}:${eventMinute.toString().padStart(2, '0')} (${eventHour}:${eventMinute.toString().padStart(2, '0')}${eventPeriod || ''}), Target: ${targetHour}:${targetMinute.toString().padStart(2, '0')}`);
             console.log(`[BROWSER] Event element tag: ${event.tagName}, class: ${event.className}`);
             
-            // Generate a unique selector for this element
-            // Try to find a unique attribute or path
+            // Generate multiple selector strategies for reliability
             let selector = null;
+            let xpathSelector = null;
+            
+            // Strategy 1: ID selector (most reliable)
             if (event.id) {
               selector = `#${event.id}`;
-            } else if (event.className) {
-              // Try to create a more specific selector
+            } 
+            // Strategy 2: CSS class selector with index
+            else if (event.className) {
               const classes = event.className.split(' ').filter(c => c && !c.includes('ng-'));
               if (classes.length > 0) {
-                // Find index among siblings with same class
                 const siblings = Array.from(event.parentElement?.children || []);
                 const sameClassSiblings = siblings.filter(el => {
                   const elClasses = el.className?.split(' ') || [];
@@ -2837,6 +2839,76 @@ async function bookClass({
               }
             }
             
+            // Strategy 3: Generate XPath selector based on text content
+            // XPath is more reliable for finding elements by their text content
+            try {
+              // Create a simple XPath based on text content (most reliable)
+              const timeText = `${eventHour}:${eventMinute.toString().padStart(2, '0')}${eventPeriod}`;
+              const timeTextAlt = `${eventHour12}:${targetMinute.toString().padStart(2, '0')}${targetPeriod}`;
+              
+              // Try multiple XPath patterns
+              const xpathPatterns = [
+                `//${event.tagName.toLowerCase()}[contains(text(), "${timeText}")]`,
+                `//${event.tagName.toLowerCase()}[contains(text(), "${timeTextAlt}")]`,
+                `//*[contains(text(), "${timeText}") and contains(@class, "${event.className.split(' ')[0]}")]`
+              ];
+              
+              // Use the first pattern as default, but we'll try all in the click logic
+              xpathSelector = xpathPatterns[0];
+              
+              // Also try to generate a full XPath path if needed
+              try {
+                const getXPath = (element) => {
+                  if (!element || !element.parentNode) return '';
+                  if (element.id) {
+                    return `//*[@id="${element.id}"]`;
+                  }
+                  if (element === document.body) {
+                    return '/html/body';
+                  }
+                  let ix = 0;
+                  const siblings = element.parentNode.childNodes || [];
+                  for (let i = 0; i < siblings.length; i++) {
+                    const sibling = siblings[i];
+                    if (sibling === element) {
+                      const tagName = element.tagName?.toLowerCase() || '';
+                      const parentXPath = getXPath(element.parentNode);
+                      if (!parentXPath) return '';
+                      return `${parentXPath}/${tagName}[${ix + 1}]`;
+                    }
+                    if (sibling.nodeType === 1 && sibling.tagName === element.tagName) {
+                      ix++;
+                    }
+                  }
+                  return '';
+                };
+                const fullXPath = getXPath(event);
+                if (fullXPath && fullXPath.length > 0) {
+                  // Store both, but prefer the simpler one
+                  xpathSelector = xpathPatterns[0];
+                }
+              } catch (e) {
+                // Fall back to simple XPath
+                console.log(`[BROWSER] Full XPath generation failed, using simple XPath`);
+              }
+            } catch (e) {
+              console.log(`[BROWSER] XPath generation failed: ${e?.message}`);
+            }
+            
+            // Get element's position info for direct clicking
+            const allEvents = Array.from(document.querySelectorAll(
+              'mwl-calendar-week-view-event, ' +
+              'div.checker-details, ' +
+              'div[class*="calendar-event"], ' +
+              'div[class*="event"], ' +
+              '[class*="cal-event"], ' +
+              'div[class*="cal-day-event"], ' +
+              '.cal-day-event, ' +
+              '[data-event-index], ' +
+              'div.cal-event-item'
+            ));
+            const elementIndex = Array.from(allEvents).indexOf(event);
+            
             // Return info so we can click it with Puppeteer native click
             return { 
               success: true, 
@@ -2844,6 +2916,8 @@ async function bookClass({
               elementTag: event.tagName,
               elementClass: event.className || '',
               selector: selector,
+              xpathSelector: xpathSelector,
+              elementIndex: elementIndex, // Index in the allEvents array
               // Also return the element's position in the DOM for fallback
               eventIndex: Array.from(event.parentElement?.children || []).indexOf(event),
               parentSelector: event.parentElement?.tagName?.toLowerCase() || null
@@ -3103,38 +3177,91 @@ async function bookClass({
           }
           
           // 3. Hover over the class element first (humans hover before clicking)
+          // Try multiple methods to find the element for hovering
+          let hoverElement = null;
           if (classInfo.selector) {
             try {
-              const classElement = await page.$(classInfo.selector);
-              if (classElement) {
-                const isVisible = await classElement.isVisible().catch(() => false);
-                if (isVisible) {
-                  dlog(`  Hovering over class element to simulate human behavior...`);
-                  const box = await classElement.boundingBox();
-                  if (box) {
-                    // Move mouse to the element (but don't click yet)
-                    const hoverX = box.x + box.width / 2;
-                    const hoverY = box.y + box.height / 2;
-                    await page.mouse.move(hoverX, hoverY, { steps: Math.floor(Math.random() * 10) + 5 });
-                    await humanDelay(500, 1000); // Hover for a bit
-                    
-                    // Small random mouse movements while hovering (like humans do)
-                    for (let i = 0; i < 2; i++) {
-                      const smallMoveX = hoverX + (Math.random() * 20 - 10);
-                      const smallMoveY = hoverY + (Math.random() * 20 - 10);
-                      await page.mouse.move(smallMoveX, smallMoveY, { steps: 3 });
-                      await sleep(Math.random() * 200 + 100);
-                    }
-                    
-                    // Move back to center
-                    await page.mouse.move(hoverX, hoverY, { steps: 3 });
-                    await humanDelay(300, 600);
+              hoverElement = await page.$(classInfo.selector);
+            } catch (e) {
+              dlog(`  Could not find element with selector for hover: ${e?.message}`);
+            }
+          }
+          
+          // Fallback to XPath if selector didn't work
+          if (!hoverElement && classInfo.xpathSelector) {
+            try {
+              const xpathHandle = await page.evaluateHandle((xpath) => {
+                const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                return result.singleNodeValue;
+              }, classInfo.xpathSelector);
+              if (xpathHandle && xpathHandle.asElement()) {
+                hoverElement = xpathHandle.asElement();
+              }
+            } catch (e) {
+              dlog(`  Could not find element with XPath for hover: ${e?.message}`);
+            }
+          }
+          
+          // Fallback to element index if XPath didn't work
+          if (!hoverElement && classInfo.elementIndex !== undefined && classInfo.elementIndex >= 0) {
+            try {
+              const elementHandle = await page.evaluateHandle((index) => {
+                const allEvents = Array.from(document.querySelectorAll(
+                  'mwl-calendar-week-view-event, ' +
+                  'div.checker-details, ' +
+                  'div[class*="calendar-event"], ' +
+                  'div[class*="event"], ' +
+                  '[class*="cal-event"], ' +
+                  'div[class*="cal-day-event"], ' +
+                  '.cal-day-event, ' +
+                  '[data-event-index], ' +
+                  'div.cal-event-item'
+                ));
+                const visibleEvents = allEvents.filter(el => el.offsetParent !== null);
+                if (index < visibleEvents.length) {
+                  return visibleEvents[index];
+                }
+                return null;
+              }, classInfo.elementIndex);
+              if (elementHandle && elementHandle.asElement()) {
+                hoverElement = elementHandle.asElement();
+              }
+            } catch (e) {
+              dlog(`  Could not find element by index for hover: ${e?.message}`);
+            }
+          }
+          
+          if (hoverElement) {
+            try {
+              const isVisible = await hoverElement.isVisible().catch(() => false);
+              if (isVisible) {
+                dlog(`  Hovering over class element to simulate human behavior...`);
+                const box = await hoverElement.boundingBox();
+                if (box) {
+                  // Move mouse to the element (but don't click yet)
+                  const hoverX = box.x + box.width / 2;
+                  const hoverY = box.y + box.height / 2;
+                  await page.mouse.move(hoverX, hoverY, { steps: Math.floor(Math.random() * 10) + 5 });
+                  await humanDelay(500, 1000); // Hover for a bit
+                  
+                  // Small random mouse movements while hovering (like humans do)
+                  for (let i = 0; i < 2; i++) {
+                    const smallMoveX = hoverX + (Math.random() * 20 - 10);
+                    const smallMoveY = hoverY + (Math.random() * 20 - 10);
+                    await page.mouse.move(smallMoveX, smallMoveY, { steps: 3 });
+                    await sleep(Math.random() * 200 + 100);
                   }
+                  
+                  // Move back to center
+                  await page.mouse.move(hoverX, hoverY, { steps: 3 });
+                  await humanDelay(300, 600);
                 }
               }
             } catch (e) {
               dlog(`  Hover simulation failed: ${e?.message}`);
             }
+          } else {
+            dlog(`  ⚠ Could not find element for hover simulation`);
           }
           
           // 4. Additional random delay to simulate decision-making
@@ -3244,7 +3371,147 @@ async function bookClass({
             }
           }
           
-          // Method 1b: Fallback to original selector method if Locator API didn't work
+          // Method 1b: Try XPath selector if CSS selector failed
+          if (!clicked && classInfo.xpathSelector) {
+            try {
+              dlog(`  Trying XPath selector: ${classInfo.xpathSelector}`);
+              const xpathElement = await page.evaluateHandle((xpath) => {
+                const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                return result.singleNodeValue;
+              }, classInfo.xpathSelector);
+              
+              if (xpathElement && xpathElement.asElement()) {
+                const element = xpathElement.asElement();
+                const isVisible = await element.isVisible().catch(() => false);
+                if (isVisible) {
+                  dlog(`  Found element using XPath, attempting to click...`);
+                  const box = await element.boundingBox();
+                  if (box) {
+                    // Try to find div.title first
+                    const titleElement = await element.$('div.title');
+                    if (titleElement) {
+                      const titleBox = await titleElement.boundingBox();
+                      if (titleBox) {
+                        const clickX = titleBox.x + 170;
+                        const clickY = titleBox.y + 15;
+                        await page.mouse.move(clickX, clickY, { steps: 5 });
+                        await humanDelay(200, 400);
+                        await humanLikeClick(page, clickX, clickY);
+                        clicked = true;
+                        dlog(`  ✓ Clicked using XPath selector (div.title)`);
+                      }
+                    }
+                    
+                    // If no title, click the element directly
+                    if (!clicked) {
+                      const clickX = box.x + box.width * 0.12;
+                      const clickY = box.y + box.height / 2;
+                      await page.mouse.move(clickX, clickY, { steps: 5 });
+                      await humanDelay(200, 400);
+                      await humanLikeClick(page, clickX, clickY);
+                      clicked = true;
+                      dlog(`  ✓ Clicked using XPath selector (element)`);
+                    }
+                  }
+                }
+              }
+            } catch (e) {
+              dlog(`  XPath selector click failed: ${e?.message}`);
+            }
+          }
+          
+          // Method 1c: Try using element index to find and click directly
+          if (!clicked && classInfo.elementIndex !== undefined && classInfo.elementIndex >= 0) {
+            try {
+              dlog(`  Trying to find element by index: ${classInfo.elementIndex}`);
+              const element = await page.evaluate((index) => {
+                const allEvents = Array.from(document.querySelectorAll(
+                  'mwl-calendar-week-view-event, ' +
+                  'div.checker-details, ' +
+                  'div[class*="calendar-event"], ' +
+                  'div[class*="event"], ' +
+                  '[class*="cal-event"], ' +
+                  'div[class*="cal-day-event"], ' +
+                  '.cal-day-event, ' +
+                  '[data-event-index], ' +
+                  'div.cal-event-item'
+                ));
+                const visibleEvents = allEvents.filter(el => el.offsetParent !== null);
+                if (index < visibleEvents.length) {
+                  return visibleEvents[index];
+                }
+                return null;
+              }, classInfo.elementIndex);
+              
+              if (element) {
+                // Click the element directly using page.evaluate
+                const clickResult = await page.evaluate((index) => {
+                  const allEvents = Array.from(document.querySelectorAll(
+                    'mwl-calendar-week-view-event, ' +
+                    'div.checker-details, ' +
+                    'div[class*="calendar-event"], ' +
+                    'div[class*="event"], ' +
+                    '[class*="cal-event"], ' +
+                    'div[class*="cal-day-event"], ' +
+                    '.cal-day-event, ' +
+                    '[data-event-index], ' +
+                    'div.cal-event-item'
+                  ));
+                  const visibleEvents = allEvents.filter(el => el.offsetParent !== null);
+                  if (index < visibleEvents.length) {
+                    const targetElement = visibleEvents[index];
+                    const box = targetElement.getBoundingClientRect();
+                    
+                    // Try to find div.title first
+                    const titleElement = targetElement.querySelector('div.title');
+                    if (titleElement) {
+                      const titleBox = titleElement.getBoundingClientRect();
+                      const clickX = titleBox.x + 170;
+                      const clickY = titleBox.y + 15;
+                      targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      // Dispatch click event
+                      const clickEvent = new MouseEvent('click', {
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: clickX,
+                        clientY: clickY
+                      });
+                      targetElement.dispatchEvent(clickEvent);
+                      targetElement.click();
+                      return { clicked: true, method: 'div.title' };
+                    } else {
+                      // Click the element directly at left side
+                      const clickX = box.x + box.width * 0.12;
+                      const clickY = box.y + box.height / 2;
+                      targetElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                      const clickEvent = new MouseEvent('click', {
+                        view: window,
+                        bubbles: true,
+                        cancelable: true,
+                        clientX: clickX,
+                        clientY: clickY
+                      });
+                      targetElement.dispatchEvent(clickEvent);
+                      targetElement.click();
+                      return { clicked: true, method: 'element' };
+                    }
+                  }
+                  return { clicked: false };
+                }, classInfo.elementIndex);
+                
+                if (clickResult && clickResult.clicked) {
+                  clicked = true;
+                  dlog(`  ✓ Clicked using element index (${clickResult.method})`);
+                  await sleep(1000); // Wait for click to register
+                }
+              }
+            } catch (e) {
+              dlog(`  Element index click failed: ${e?.message}`);
+            }
+          }
+          
+          // Method 1d: Fallback to original selector method if all else failed
           if (!clicked && classInfo.selector) {
             try {
               await page.waitForSelector(classInfo.selector, { visible: true, timeout: 3000 });

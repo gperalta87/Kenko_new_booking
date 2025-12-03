@@ -8,7 +8,7 @@ const testBooking = async () => {
     email: "ocapur@gmail.com",
     password: "Rusia2018",
     gymName: "PontePila",
-    targetDate: "2025-11-27", // Format: YYYY-MM-DD
+    targetDate: "2024-12-05", // Format: YYYY-MM-DD
     targetTime: "9:00 am", // Format: HH:mm or "9:00 am"
     debug: false // Railway runs in headless mode
   };
